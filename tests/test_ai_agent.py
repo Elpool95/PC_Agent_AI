@@ -1,0 +1,74 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+from modules.ai_agent import GeminiAgent
+
+
+def _patch_hw_and_client(mock_client):
+    return (
+        patch("modules.ai_agent.genai.Client", return_value=mock_client),
+        patch("modules.tools.info_cpu_nome", return_value="Test CPU"),
+        patch("modules.tools.monitora_gpu", return_value={"gpu": "Test GPU"}),
+        patch("modules.tools.info_versioni_sistema", return_value={"windows": "Windows 11 Test", "driver_gpu": "555.00"}),
+    )
+
+
+def test_gemini_agent_init_and_dynamic_prompt():
+    mock_client = MagicMock()
+    mock_chat = MagicMock()
+    mock_chat.send_message.return_value = SimpleNamespace(text="Risposta OK")
+    mock_client.chats.create.return_value = mock_chat
+
+    p1, p2, p3, p4 = _patch_hw_and_client(mock_client)
+    with p1, p2, p3, p4:
+        ag = GeminiAgent()
+        assert ag.errore_init is None
+        assert "Test CPU" in ag._config_chat.system_instruction
+        assert "Test GPU" in ag._config_chat.system_instruction
+        assert ag.invia("ciao") == "Risposta OK"
+
+
+def test_gemini_agent_fallback_on_503_and_404():
+    mock_client = MagicMock()
+    chat_fail_503 = MagicMock()
+    chat_fail_503.send_message.side_effect = RuntimeError("503 UNAVAILABLE")
+    chat_fail_503.get_history.return_value = ["prev"]
+
+    chat_fail_404 = MagicMock()
+    chat_fail_404.send_message.side_effect = RuntimeError("404 NOT_FOUND")
+    chat_fail_404.get_history.return_value = ["prev"]
+
+    chat_ok = MagicMock()
+    chat_ok.send_message.return_value = SimpleNamespace(text="Risposta dal fallback")
+
+    mock_client.chats.create.side_effect = [chat_fail_503, chat_fail_404, chat_ok]
+    stati = []
+
+    p1, p2, p3, p4 = _patch_hw_and_client(mock_client)
+    with p1, p2, p3, p4:
+        ag = GeminiAgent()
+        risposta = ag.invia("test fallback", on_retry=stati.append)
+
+    assert risposta == "Risposta dal fallback"
+    assert len(stati) == 2
+    assert ag.modello_corrente == "gemini-3.5-flash-lite"
+
+
+def test_gemini_agent_non_retryable_error():
+    mock_client = MagicMock()
+    mock_chat = MagicMock()
+    mock_chat.send_message.side_effect = ValueError("Bad request")
+    mock_client.chats.create.return_value = mock_chat
+
+    p1, p2, p3, p4 = _patch_hw_and_client(mock_client)
+    with p1, p2, p3, p4:
+        ag = GeminiAgent()
+        res = ag.invia("ciao")
+    assert res.startswith("Errore:")
+
+
+def test_gemini_agent_offline_init_error():
+    with patch("modules.ai_agent.genai.Client", side_effect=RuntimeError("No API Key")):
+        ag = GeminiAgent()
+        assert ag.errore_init == "No API Key"
+        res = ag.invia("ciao")
+        assert "non disponibile" in res.lower()
