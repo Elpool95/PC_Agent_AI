@@ -333,6 +333,27 @@ def test_gui_lock_lhm_button_and_action(gui_app):
         assert "Locked" in app.btn_lhm_lock.cget("text")
 
 
+def test_gui_gaming_badges_grid_layout(gui_app):
+    app, root, _ = gui_app
+    badges = [
+        {"id": "fps", "testo": "FPS Cap 72 ●", "fg": "#81c784", "bg": "#1a2b1d"},
+        {"id": "timer", "testo": "Timer: 0.50ms ●", "fg": "#81c784", "bg": "#1a2b1d"},
+        {"id": "standby", "testo": "Standby: 420 MB ●", "fg": "#81c784", "bg": "#1a2b1d"},
+        {"id": "svc", "testo": "Servizi BG: Pausa (3/3) ●", "fg": "#81c784", "bg": "#1a2b1d"},
+        {"id": "hags", "testo": "HAGS: ON ●", "fg": "#81c784", "bg": "#1a2b1d"},
+        {"id": "dldsr", "testo": "DLDSR: ON (3413x1440) ●", "fg": "#81c784", "bg": "#1a2b1d"},
+        {"id": "physx", "testo": "PhysX: GPU ●", "fg": "#81c784", "bg": "#1a2b1d"},
+        {"id": "vbs", "testo": "VBS/CoreIso: ON ●", "fg": "#81c784", "bg": "#1a2b1d"},
+    ]
+    app._aggiorna_stato_gaming_ui("Gaming: OK", "#81c784", badges)
+    root.update_idletasks()
+    assert len(app.gaming_badges) == 8
+    assert app.gaming_badges["timer"].cget("text") == "Timer: 0.50ms ●"
+    assert app.gaming_badges["standby"].cget("fg") == "#81c784"
+    # Verifica che la griglia 2x4 rientri comodamente nella larghezza minima finestra (820px)
+    assert app.gaming_grid_frame.winfo_reqwidth() <= 820
+
+
 def test_gui_minimized_pauses_and_resumes_telemetry(gui_app):
     app, root, _ = gui_app
     with patch.object(root, "state", return_value="iconic"):

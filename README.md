@@ -24,7 +24,7 @@ Su PC con componenti non più recentissimi ogni singolo ciclo di CPU, picco di I
   - **Dischi & Salute S.M.A.R.T.**: rilevamento automatico di tutte le unità montate, spazio libero, velocità `R/W MB/s`, **temperatura `°C`** (soglie differenziate SSD vs HDD) e **stato salute stile CrystalDiskInfo** (`Good %`, `Caution`, `Bad`) con avvisi colore per singolo disco.
   - **GPU NVIDIA**: utilizzo `%`, temperatura `°C`, VRAM, consumo `W`, ventole `%` e frequenza Core `MHz` *(tramite `nvidia-smi`)*.
   - **Rete**: interfaccia attiva, link speed, IP locale, traffico `↓ / ↑` live e `Ping` verso `1.1.1.1`.
-  - **Riga live Gaming Status**: indicatori immediati in tempo reale per `FPS Cap`, `Servizi BG`, `HAGS`, `DLDSR`, `PhysX` e `VBS/CoreIso`.
+  - **Griglia live Gaming Status (badge 2×4)**: indicatori colorati compatti in tempo reale per `FPS Cap`, `Timer Resolution (0.5 ms)`, `Standby RAM (ISLC)`, `Servizi BG`, `HAGS`, `DLDSR`, `PhysX` e `VBS/CoreIso`.
   - **Footer di sistema**: versione di Windows e versione del driver grafico installato.
 - **Azioni rapide locali**:
   - `Top Process`: mostra i Top 5 processi per CPU e i Top 5 per RAM.
@@ -32,6 +32,7 @@ Su PC con componenti non più recentissimi ogni singolo ciclo di CPU, picco di I
   - `Gaming Mode` / `Balance`:
     - Attiva il piano *Prestazioni eccellenti* con tuning `powercfg` (USB Suspend OFF, PCIe Power Mgmt OFF, Disk Standby OFF, CPU Core Unpark 100%).
     - Applica ottimizzazioni Windows HKCU senza UAC (Game Mode ON, Game DVR OFF, Notifiche Toast / Non Disturbare / Suoni Notifiche OFF, Trasparenze DWM / Animazioni UI OFF, VRR & Windowed Opt ON).
+    - **Ottimizzazione nativa stile ISLC**: imposta la **Timer Resolution di Windows a `0.50 ms`** (zero UAC, ripristinata su `Balance`), monitora la **Standby List RAM** via PDH, propone lo svuotamento (`MemoryPurgeStandbyList`) quando è elevata con poca RAM libera e, se l'app è avviata come Amministratore, attiva il guardiano automatico in background durante il gioco.
     - Imposta automaticamente il **Limite FPS NVIDIA (`Max Frame Rate`)** via `NVAPI DRS` (senza UAC) in base al refresh rate del monitor principale (`Hz - 3`), ripristinandolo su `Balance`.
     - Chiude in sicurezza browser, app background non protette e overlay superflui (`GameBar`, `Overwolf`, `NVIDIA Share/Overlay`, `Medal`), abbassa a `BELOW_NORMAL` la priorità di app e launcher secondari tenuti aperti (es. Discord, SteamWebHelper, Epic, EA App, Ubisoft, Battle.net, GOG, Xbox) e di PC Agent AI stesso, pulisce i file temporanei e propone la pausa temporanea dei servizi Windows pesanti (`WSearch`, `SysMain`, `DiagTrack` via UAC, segnalando in particolare `WSearch` in presenza di dischi meccanici HDD).
     - Esegue un **Check-up pre-partita** su HAGS, VRR, PhysX (percorso DCH), **VBS / Integrità della memoria (Isolamento core)** (verifica che sia attivo per compatibilità anti-cheat e protezione da accessi non autorizzati, con apertura guidata in Sicurezza di Windows), DLDSR su sistemi CPU-bound, dischi HDD con indicizzazione attiva, launcher secondari, rete/ping, spazio dischi, temperature e RAM, con feedback esplicito in console su ogni scelta.

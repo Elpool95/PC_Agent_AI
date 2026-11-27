@@ -76,13 +76,15 @@ class PCAgentGUI:
         self.lbl_net.pack(side=tk.LEFT, padx=4)
 
         row5 = tk.Frame(tele_frame, bg="#141414")
-        row5.pack(fill=tk.X, padx=8, pady=(0, 6))
+        row5.pack(fill=tk.X, padx=8, pady=(2, 6))
 
+        self.gaming_grid_frame = row5
+        self.gaming_badges = {}
         self.lbl_gaming_status = tk.Label(
             row5, text="Gaming: rilevamento stato...", bg="#141414", fg="#9e9e9e",
             font=("Consolas", 9, "bold"), anchor="w"
         )
-        self.lbl_gaming_status.pack(side=tk.LEFT, padx=4)
+        self.lbl_gaming_status.grid(row=0, column=0, sticky="w", padx=4)
 
         # --- PULSANTI RAPIDI LOCALI ---
         btn_frame = tk.Frame(root, bg="#1e1e1e")
@@ -251,12 +253,33 @@ class PCAgentGUI:
         self._aggiorna_barra_gaming_async()
 
     def _aggiorna_barra_gaming_async(self):
-        """Aggiorna la riga di stato Gaming (FPS Cap, Servizi BG, HAGS, DLDSR) in modo non bloccante."""
+        """Aggiorna la griglia di stato Gaming (FPS Cap, Timer, Standby, Servizi, HAGS, DLDSR, PhysX, VBS) in modo non bloccante."""
         stato_g = tools.stato_ottimizzazioni_gaming()
-        self.root.after(0, self._aggiorna_stato_gaming_ui, stato_g["testo_barra"], stato_g["colore"])
+        self.root.after(0, self._aggiorna_stato_gaming_ui, stato_g["testo_barra"], stato_g["colore"], stato_g.get("badges"))
 
-    def _aggiorna_stato_gaming_ui(self, testo: str, colore: str):
-        self.lbl_gaming_status.config(text=testo, fg=colore)
+    def _aggiorna_stato_gaming_ui(self, testo: str, colore: str, badges: list | None = None):
+        if badges:
+            if self.lbl_gaming_status is not None:
+                self.lbl_gaming_status.grid_remove()
+            for idx, b in enumerate(badges):
+                bid = b["id"]
+                r, c = divmod(idx, 4)
+                lbl = self.gaming_badges.get(bid)
+                if lbl is None:
+                    lbl = tk.Label(
+                        self.gaming_grid_frame,
+                        text=b["testo"], bg=b.get("bg", "#202020"), fg=b.get("fg", colore),
+                        font=("Consolas", 9, "bold"), padx=7, pady=2, anchor="w",
+                        bd=1, relief=tk.SOLID,
+                    )
+                    lbl.grid(row=r, column=c, sticky="w", padx=(0, 6), pady=2)
+                    self.gaming_badges[bid] = lbl
+                else:
+                    lbl.config(text=b["testo"], bg=b.get("bg", "#202020"), fg=b.get("fg", colore))
+        else:
+            if self.lbl_gaming_status is not None:
+                self.lbl_gaming_status.grid(row=0, column=0, sticky="w", padx=4)
+                self.lbl_gaming_status.config(text=testo, fg=colore)
 
     def _aggiorna_stato_lhm_btn(self, lhm_sec: dict):
         if lhm_sec.get("sicuro"):
@@ -427,7 +450,7 @@ class PCAgentGUI:
                 )
                 if ciclo == 1 or ciclo % 5 == 0:
                     stato_g = tools.stato_ottimizzazioni_gaming()
-                    self.root.after(0, self._aggiorna_stato_gaming_ui, stato_g["testo_barra"], stato_g["colore"])
+                    self.root.after(0, self._aggiorna_stato_gaming_ui, stato_g["testo_barra"], stato_g["colore"], stato_g.get("badges"))
             except Exception:
                 pass
 
@@ -664,6 +687,23 @@ class PCAgentGUI:
                 self.root.after(
                     0, self.aggiungi_testo, "Sistema",
                     "VBS / Integrità della memoria (Isolamento core) lasciato disattivo su scelta utente ○.\n"
+                )
+
+        if checkup.get("standby_alta"):
+            sb_mb = checkup.get("standby_mb")
+            if tools.e_amministratore():
+                res_sb = tools.pulisci_standby_list_ram(consenti_uac=False)
+                self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_sb['messaggio']}\n")
+            elif self._chiedi_conferma_utente(
+                f"Standby List RAM elevata ({sb_mb} MB) con poca RAM libera.\n"
+                "Vuoi svuotare ora la Standby List (stile ISLC) per ridurre micro-stutter?\n\nRichiederà conferma UAC."
+            ):
+                res_sb = tools.pulisci_standby_list_ram(consenti_uac=True)
+                self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_sb['messaggio']}\n")
+            else:
+                self.root.after(
+                    0, self.aggiungi_testo, "Sistema",
+                    f"Standby List RAM ({sb_mb} MB) lasciata invariata su scelta utente ○.\n"
                 )
 
         self._aggiorna_barra_gaming_async()

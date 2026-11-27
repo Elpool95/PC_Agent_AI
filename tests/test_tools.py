@@ -217,6 +217,8 @@ def test_piano_energetico_e_modalita(tmp_path):
          patch("subprocess.run", return_value=SimpleNamespace(returncode=0)) as mock_run, \
          patch("modules.tools.applica_ottimizzazioni_registro_gaming", return_value=["Windows Game Mode ON", "Notifiche Toast OFF"]), \
          patch("modules.tools.applica_fps_cap_gaming", return_value={"applicato": True, "target_fps": 72, "refresh_hz": 75, "messaggio": "Limite FPS NVIDIA (Max Frame Rate): 72 FPS (monitor principale 2560x1080 @ 75 Hz, margine -3 Hz)."}), \
+         patch("modules.tools.imposta_timer_resolution_gaming", return_value={"attivo": True, "ms": 0.5, "messaggio": "Timer Resolution Windows (stile ISLC): 0.50 ms attivata (zero UAC)."}), \
+         patch("modules.tools.avvia_guardiano_islc", return_value=False), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True) as mock_prio, \
          patch("psutil.virtual_memory", return_value=fake_vm), \
          patch("psutil.wait_procs", return_value=([], [])), \
@@ -238,6 +240,8 @@ def test_piano_energetico_e_modalita(tmp_path):
          patch("subprocess.run") as mock_run2, \
          patch("modules.tools.ripristina_ottimizzazioni_registro_gaming", return_value=4), \
          patch("modules.tools.ripristina_fps_cap_gaming", return_value=" Limite FPS NVIDIA rimosso (Disattivato)."), \
+         patch("modules.tools.imposta_timer_resolution_gaming", return_value={"attivo": False, "ms": 15.63, "messaggio": " Timer Resolution ripristinata (15.63 ms)."}), \
+         patch("modules.tools.ferma_guardiano_islc"), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True) as mock_prio2:
         res_bil = tools.ripristina_modalita_bilanciata()
         assert "Bilanciato" in res_bil
@@ -493,6 +497,8 @@ def test_snapshot_persistente_piano_personalizzato(tmp_path):
          patch("subprocess.run", return_value=SimpleNamespace(returncode=0)), \
          patch("modules.tools.applica_ottimizzazioni_registro_gaming", return_value=[]), \
          patch("modules.tools.applica_fps_cap_gaming", return_value={"applicato": False, "target_fps": 0, "refresh_hz": 0, "messaggio": ""}), \
+         patch("modules.tools.imposta_timer_resolution_gaming", return_value={"attivo": True, "ms": 0.5, "messaggio": ""}), \
+         patch("modules.tools.avvia_guardiano_islc", return_value=False), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True), \
          patch("psutil.virtual_memory", return_value=SimpleNamespace(used=4 * 1024**3)), \
          patch("psutil.process_iter", return_value=[]):
@@ -504,6 +510,8 @@ def test_snapshot_persistente_piano_personalizzato(tmp_path):
          patch("subprocess.run") as mock_restore_run, \
          patch("modules.tools.ripristina_ottimizzazioni_registro_gaming", return_value=0), \
          patch("modules.tools.ripristina_fps_cap_gaming", return_value=""), \
+         patch("modules.tools.imposta_timer_resolution_gaming", return_value={"attivo": False, "ms": 15.63, "messaggio": ""}), \
+         patch("modules.tools.ferma_guardiano_islc"), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True):
         res = tools.ripristina_modalita_bilanciata()
     assert "AMD Ryzen Balanced" in res
@@ -523,6 +531,7 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
          patch("modules.tools._leggi_physx_auto", return_value=False), \
          patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
          patch("modules.tools._launcher_opzionali_attivi", return_value=[]), \
+         patch("modules.tools.leggi_memoria_standby", return_value={"standby_mb": 400, "free_mb": 4000}), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
          patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=50.0, free=200 * 1024**3)), \
@@ -544,6 +553,7 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
          patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": False, "hvci_attivo": False, "attivo": False}), \
          patch("modules.tools._stato_servizi_dettaglio", return_value={"WSearch": "running"}), \
          patch("modules.tools._launcher_opzionali_attivi", return_value=["EpicGamesLauncher.exe"]), \
+         patch("modules.tools.leggi_memoria_standby", return_value={"standby_mb": 2048, "free_mb": 256}), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Wi-Fi", "ip": "192.168.1.5", "link_mbps": 300}), \
          patch("modules.tools.misura_ping", return_value={"ms": 85, "stato": "85 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=95.0, free=10 * 1024**3)), \
@@ -552,7 +562,9 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
          patch("modules.tools.info_monitor_principale", return_value=mon_dldsr_ok):
         res_warn = tools.diagnostica_pre_partita(ram_slow, dischi_hdd)
     assert res_warn["ok"] is False
-    assert len(res_warn["avvisi"]) == 13
+    assert len(res_warn["avvisi"]) == 14
+    assert res_warn["standby_alta"] is True
+    assert "Standby List RAM" in res_warn["testo"]
     assert res_warn["vbs_hvci_attivo"] is False
     assert res_warn["hdd_rilevati"] == ["D"]
     assert res_warn["launcher_opzionali_attivi"] == ["EpicGamesLauncher.exe"]
@@ -688,6 +700,7 @@ def test_diagnostica_dldsr_cpu_bound_e_monitor():
          patch("modules.tools._leggi_physx_auto", return_value=False), \
          patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
          patch("modules.tools._launcher_opzionali_attivi", return_value=[]), \
+         patch("modules.tools.leggi_memoria_standby", return_value={"standby_mb": 400, "free_mb": 4000}), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
          patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=50.0, free=200 * 1024**3)), \
@@ -713,14 +726,19 @@ def test_stato_ottimizzazioni_gaming():
          patch("modules.tools._leggi_hags_attivo", return_value=True), \
          patch("modules.tools._leggi_physx_auto", return_value=False), \
          patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
+         patch("modules.tools.leggi_timer_resolution_ms", return_value=0.5), \
+         patch("modules.tools.leggi_memoria_standby", return_value={"standby_mb": 420, "free_mb": 4096}), \
          patch("modules.tools.info_monitor_principale", return_value={"dldsr_attivo": True, "risoluzioni_dldsr": ["3413x1440"]}):
         st_on = tools.stato_ottimizzazioni_gaming()
     assert "FPS Cap 72 ●" in st_on["testo_barra"]
+    assert "Timer: 0.50ms ●" in st_on["testo_barra"]
+    assert "Standby: 420 MB ●" in st_on["testo_barra"]
     assert "Pausa (3/3) ●" in st_on["testo_barra"]
     assert "HAGS: ON ●" in st_on["testo_barra"]
     assert "DLDSR: ON (3413x1440) ●" in st_on["testo_barra"]
     assert "PhysX: GPU ●" in st_on["testo_barra"]
     assert "VBS/CoreIso: ON ●" in st_on["testo_barra"]
+    assert len(st_on["badges"]) == 8
     assert st_on["colore"] == "#81c784"
 
     # Tutto spento (grigio)
@@ -729,15 +747,62 @@ def test_stato_ottimizzazioni_gaming():
          patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch("modules.tools._leggi_physx_auto", return_value=True), \
          patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": False, "hvci_attivo": False, "attivo": False}), \
+         patch("modules.tools.leggi_timer_resolution_ms", return_value=15.63), \
+         patch("modules.tools.leggi_memoria_standby", return_value={"standby_mb": 2048, "free_mb": 200}), \
          patch("modules.tools.info_monitor_principale", return_value={"dldsr_attivo": False, "risoluzioni_dldsr": []}):
         st_off = tools.stato_ottimizzazioni_gaming()
     assert "FPS Cap OFF ○" in st_off["testo_barra"]
+    assert "Timer: 15.63ms ○" in st_off["testo_barra"]
+    assert "Standby: 2048 MB !" in st_off["testo_barra"]
     assert "Attivi (3/3) ○" in st_off["testo_barra"]
     assert "HAGS: OFF ○" in st_off["testo_barra"]
     assert "DLDSR: OFF ○" in st_off["testo_barra"]
     assert "PhysX: Auto ○" in st_off["testo_barra"]
     assert "VBS/CoreIso: OFF ○" in st_off["testo_barra"]
+    assert len(st_off["badges"]) == 8
     assert st_off["colore"] == "#9e9e9e"
+
+
+def test_islc_timer_resolution_e_standby_list():
+    # Smoke test lettura reale Timer Resolution e Standby RAM (zero UAC)
+    ms = tools.leggi_timer_resolution_ms()
+    assert ms is None or ms > 0
+    mem = tools.leggi_memoria_standby()
+    assert "standby_mb" in mem and "free_mb" in mem
+
+    # Attivazione e ripristino Timer Resolution (mocked ntdll/winmm)
+    with patch("ctypes.windll.ntdll.NtSetTimerResolution", return_value=0), \
+         patch("ctypes.windll.winmm.timeBeginPeriod", return_value=0), \
+         patch("ctypes.windll.winmm.timeEndPeriod", return_value=0):
+        res_on = tools.imposta_timer_resolution_gaming(True)
+        assert res_on["attivo"] is True
+        assert "0.50 ms" in res_on["messaggio"]
+        res_off = tools.imposta_timer_resolution_gaming(False)
+        assert res_off["attivo"] is False
+        assert "ripristinata" in res_off["messaggio"].lower()
+
+    # Pulizia Standby List: caso Admin in-process, caso UAC accettato, caso UAC annullato
+    with patch("modules.tools.e_amministratore", return_value=True), \
+         patch("modules.tools._svuota_standby_list_in_process", return_value=True), \
+         patch("modules.tools.leggi_memoria_standby", side_effect=[{"standby_mb": 1500, "free_mb": 300}, {"standby_mb": 120, "free_mb": 1680}]):
+        r_adm = tools.pulisci_standby_list_ram()
+    assert r_adm["eseguito"] is True
+    assert "1500 MB → 120 MB" in r_adm["messaggio"]
+
+    with patch("modules.tools.e_amministratore", return_value=False), \
+         patch("modules.tools.leggi_memoria_standby", return_value={"standby_mb": 1500, "free_mb": 300}), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=42):
+        assert tools.pulisci_standby_list_ram(consenti_uac=True)["eseguito"] is True
+
+    with patch("modules.tools.e_amministratore", return_value=False), \
+         patch("modules.tools.leggi_memoria_standby", return_value={"standby_mb": 1500, "free_mb": 300}), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=5):
+        r_cancel = tools.pulisci_standby_list_ram(consenti_uac=True)
+    assert r_cancel["eseguito"] is False
+    assert "annullata" in r_cancel["messaggio"].lower()
+
+    with patch("modules.tools.e_amministratore", return_value=False):
+        assert tools.avvia_guardiano_islc() is False
 
 
 def test_vbs_hvci_e_launcher_opzionali():

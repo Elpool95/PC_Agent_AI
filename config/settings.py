@@ -61,6 +61,12 @@ TELEMETRY_INTERVAL_GAMING = 2.5
 FPS_CAP_MARGIN_HZ = 3
 FPS_CAP_MIN = 30
 
+# Ottimizzazione stile ISLC in Gaming Mode (Timer Resolution 0.5 ms + Standby List RAM)
+ISLC_TIMER_RES_100NS = 5000
+ISLC_STANDBY_THRESHOLD_MB = 1024
+ISLC_FREE_THRESHOLD_MB = 1024
+ISLC_POLL_INTERVAL_SEC = 5.0
+
 # Processi sicuri da chiudere in Modalità Gaming (browser, cloud, chat, widget, overlay superflui)
 SAFE_TO_CLOSE = [
     "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe", "vivaldi.exe",

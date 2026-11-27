@@ -9,16 +9,20 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
+import threading
 import urllib.request
 import winreg
 import psutil
 from config.settings import (
-    SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW,
+    BASE_DIR, SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW,
     DISK_CRIT, GPU_TEMP_WARN, GAMING_PAUSABLE_SERVICES,
     GAMING_THROTTLE_PROCESSES, GAMING_OPTIONAL_LAUNCHERS,
     GAMING_STATE_FILE, TELEMETRY_INTERVAL_NORMAL, TELEMETRY_INTERVAL_GAMING,
     FPS_CAP_MARGIN_HZ, FPS_CAP_MIN,
+    ISLC_TIMER_RES_100NS, ISLC_STANDBY_THRESHOLD_MB,
+    ISLC_FREE_THRESHOLD_MB, ISLC_POLL_INTERVAL_SEC,
     DISK_TEMP_WARN_HDD, DISK_TEMP_CRIT_HDD, DISK_TEMP_WARN_SSD, DISK_TEMP_CRIT_SSD,
 )
 
@@ -1490,6 +1494,225 @@ def imposta_priorita_background_gaming(bassa: bool) -> list[str]:
     return sorted(modificati)
 
 
+_TIMER_RES_ACTIVE = False
+_TIMER_RES_ATEXIT_REGISTERED = False
+_ISLC_STOP_EVENT: threading.Event | None = None
+_ISLC_THREAD: threading.Thread | None = None
+
+
+class _PDH_FMT_COUNTERVALUE(ctypes.Structure):
+    _fields_ = [("CStatus", ctypes.c_uint32), ("doubleValue", ctypes.c_double)]
+
+
+class _LUID(ctypes.Structure):
+    _fields_ = [("LowPart", ctypes.c_uint32), ("HighPart", ctypes.c_int32)]
+
+
+class _LUID_AND_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [("Luid", _LUID), ("Attributes", ctypes.c_uint32)]
+
+
+class _TOKEN_PRIVILEGES(ctypes.Structure):
+    _fields_ = [("PrivilegeCount", ctypes.c_uint32), ("Privileges", _LUID_AND_ATTRIBUTES * 1)]
+
+
+def e_amministratore() -> bool:
+    """Verifica se il processo corrente dispone di privilegi di Amministratore su Windows."""
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def leggi_timer_resolution_ms() -> float | None:
+    """Legge la risoluzione corrente del timer di sistema di Windows in millisecondi (sola lettura, zero UAC)."""
+    try:
+        min_r = ctypes.c_ulong()
+        max_r = ctypes.c_ulong()
+        curr_r = ctypes.c_ulong()
+        st = ctypes.windll.ntdll.NtQueryTimerResolution(
+            ctypes.byref(min_r), ctypes.byref(max_r), ctypes.byref(curr_r)
+        )
+        if st == 0 and curr_r.value > 0:
+            return round(curr_r.value / 10000.0, 2)
+    except Exception:
+        pass
+    return None
+
+
+def _rilascia_timer_resolution_atexit() -> None:
+    """Rilascia la Timer Resolution 0.5 ms alla chiusura pulita del processo."""
+    if _TIMER_RES_ACTIVE:
+        imposta_timer_resolution_gaming(False)
+
+
+def imposta_timer_resolution_gaming(attiva: bool) -> dict:
+    """Imposta (0.5 ms) o ripristina la Timer Resolution di Windows via ntdll.NtSetTimerResolution (zero UAC, 100% reversibile)."""
+    global _TIMER_RES_ACTIVE, _TIMER_RES_ATEXIT_REGISTERED
+    try:
+        curr = ctypes.c_ulong()
+        st = ctypes.windll.ntdll.NtSetTimerResolution(
+            ctypes.c_ulong(ISLC_TIMER_RES_100NS),
+            ctypes.c_bool(bool(attiva)),
+            ctypes.byref(curr),
+        )
+        if st != 0:
+            return {"attivo": _TIMER_RES_ACTIVE, "ms": leggi_timer_resolution_ms(), "messaggio": ""}
+        try:
+            if attiva:
+                ctypes.windll.winmm.timeBeginPeriod(1)
+            elif _TIMER_RES_ACTIVE:
+                ctypes.windll.winmm.timeEndPeriod(1)
+        except Exception:
+            pass
+
+        _TIMER_RES_ACTIVE = bool(attiva)
+        if attiva and not _TIMER_RES_ATEXIT_REGISTERED:
+            atexit.register(_rilascia_timer_resolution_atexit)
+            _TIMER_RES_ATEXIT_REGISTERED = True
+
+        ms_val = round(curr.value / 10000.0, 2) if curr.value else round(ISLC_TIMER_RES_100NS / 10000.0, 2)
+        if attiva:
+            msg = f"Timer Resolution Windows (stile ISLC): {ms_val:.2f} ms attivata (zero UAC)."
+        else:
+            msg = f" Timer Resolution ripristinata ({ms_val:.2f} ms)."
+        return {"attivo": _TIMER_RES_ACTIVE, "ms": ms_val, "messaggio": msg}
+    except Exception:
+        return {"attivo": _TIMER_RES_ACTIVE, "ms": None, "messaggio": ""}
+
+
+def leggi_memoria_standby() -> dict:
+    """Legge RAM in Standby List e RAM effettivamente libera (Free & Zero Page List) via PDH in-process (zero UAC)."""
+    try:
+        pdh = ctypes.WinDLL("pdh.dll")
+        h_query = ctypes.c_void_p()
+        if pdh.PdhOpenQueryW(None, 0, ctypes.byref(h_query)) != 0:
+            return {"standby_mb": None, "free_mb": None}
+        try:
+            paths = {
+                "norm": r"\Memory\Standby Cache Normal Priority Bytes",
+                "res": r"\Memory\Standby Cache Reserve Bytes",
+                "core": r"\Memory\Standby Cache Core Bytes",
+                "free": r"\Memory\Free & Zero Page List Bytes",
+            }
+            handles = {}
+            for k, path in paths.items():
+                hc = ctypes.c_void_p()
+                if pdh.PdhAddEnglishCounterW(h_query, ctypes.c_wchar_p(path), 0, ctypes.byref(hc)) == 0:
+                    handles[k] = hc
+            if not handles or pdh.PdhCollectQueryData(h_query) != 0:
+                return {"standby_mb": None, "free_mb": None}
+
+            vals = {}
+            # PDH_FMT_DOUBLE = 0x00000200
+            for k, hc in handles.items():
+                cv = _PDH_FMT_COUNTERVALUE()
+                if pdh.PdhGetFormattedCounterValue(hc, 0x00000200, None, ctypes.byref(cv)) == 0:
+                    vals[k] = max(0.0, float(cv.doubleValue))
+
+            standby_bytes = vals.get("norm", 0.0) + vals.get("res", 0.0) + vals.get("core", 0.0)
+            standby_mb = int(round(standby_bytes / (1024 * 1024))) if any(k in vals for k in ("norm", "res", "core")) else None
+            free_mb = int(round(vals["free"] / (1024 * 1024))) if "free" in vals else None
+            return {"standby_mb": standby_mb, "free_mb": free_mb}
+        finally:
+            pdh.PdhCloseQuery(h_query)
+    except Exception:
+        return {"standby_mb": None, "free_mb": None}
+
+
+def _svuota_standby_list_in_process() -> bool:
+    """Svuota la Standby Memory List via NtSetSystemInformation(MemoryPurgeStandbyList). Richiede privilegi Admin."""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        advapi32 = ctypes.windll.advapi32
+        ntdll = ctypes.windll.ntdll
+
+        h_token = ctypes.c_void_p()
+        # TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY = 0x0028
+        if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x0028, ctypes.byref(h_token)):
+            return False
+        try:
+            luid = _LUID()
+            if not advapi32.LookupPrivilegeValueW(None, "SeProfileSingleProcessPrivilege", ctypes.byref(luid)):
+                return False
+            tp = _TOKEN_PRIVILEGES()
+            tp.PrivilegeCount = 1
+            tp.Privileges[0].Luid = luid
+            tp.Privileges[0].Attributes = 0x00000002  # SE_PRIVILEGE_ENABLED
+            advapi32.AdjustTokenPrivileges(h_token, False, ctypes.byref(tp), 0, None, None)
+        finally:
+            kernel32.CloseHandle(h_token)
+
+        # SystemMemoryListInformation = 80, MemoryPurgeStandbyList = 4
+        cmd = ctypes.c_int(4)
+        status = ntdll.NtSetSystemInformation(80, ctypes.byref(cmd), ctypes.sizeof(cmd))
+        return int(status) == 0
+    except Exception:
+        return False
+
+
+def pulisci_standby_list_ram(consenti_uac: bool = True) -> dict:
+    """Svuota la Standby List RAM (stile ISLC): in-process se Admin, oppure via UAC se consentito."""
+    prima = leggi_memoria_standby()
+    if e_amministratore():
+        ok = _svuota_standby_list_in_process()
+        dopo = leggi_memoria_standby()
+        if ok:
+            prima_mb = prima.get("standby_mb")
+            dopo_mb = dopo.get("standby_mb")
+            extra = f" ({prima_mb} MB → {dopo_mb} MB)" if (prima_mb is not None and dopo_mb is not None) else ""
+            return {"eseguito": True, "messaggio": f"Standby List RAM svuotata (stile ISLC){extra} ●."}
+        return {"eseguito": False, "messaggio": "Impossibile svuotare la Standby List RAM."}
+
+    if not consenti_uac:
+        return {"eseguito": False, "messaggio": "Pulizia Standby List saltata (richiede privilegi Amministratore/UAC)."}
+
+    parametri = '-c "from modules.tools import _svuota_standby_list_in_process; _svuota_standby_list_in_process()"'
+    try:
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, parametri, BASE_DIR, 0)
+        if ret > 32:
+            return {"eseguito": True, "messaggio": "Standby List RAM svuotata (UAC confermato, stile ISLC) ●."}
+        return {"eseguito": False, "messaggio": "Pulizia Standby List annullata dall'utente nella finestra UAC ○."}
+    except Exception as e:
+        return {"eseguito": False, "messaggio": f"Errore durante la pulizia Standby List: {e}"}
+
+
+def avvia_guardiano_islc() -> bool:
+    """Avvia il guardiano automatico stile ISLC in background (solo se Admin): svuota Standby List oltre soglia durante la Gaming Mode."""
+    global _ISLC_STOP_EVENT, _ISLC_THREAD
+    if not e_amministratore():
+        return False
+    if _ISLC_THREAD is not None and _ISLC_THREAD.is_alive():
+        return True
+    stop_ev = threading.Event()
+    _ISLC_STOP_EVENT = stop_ev
+
+    def _loop_islc():
+        while not stop_ev.wait(timeout=ISLC_POLL_INTERVAL_SEC):
+            try:
+                mem = leggi_memoria_standby()
+                sb = mem.get("standby_mb")
+                fr = mem.get("free_mb")
+                if sb is not None and fr is not None and sb >= ISLC_STANDBY_THRESHOLD_MB and fr <= ISLC_FREE_THRESHOLD_MB:
+                    _svuota_standby_list_in_process()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_loop_islc, daemon=True)
+    _ISLC_THREAD = t
+    t.start()
+    return True
+
+
+def ferma_guardiano_islc() -> None:
+    """Ferma il guardiano automatico ISLC al ritorno in modalità Balance."""
+    global _ISLC_STOP_EVENT, _ISLC_THREAD
+    if _ISLC_STOP_EVENT is not None:
+        _ISLC_STOP_EVENT.set()
+    _ISLC_STOP_EVENT = None
+    _ISLC_THREAD = None
+
+
 def imposta_priorita_processo_corrente(bassa: bool) -> bool:
     """Imposta la priorità del processo corrente su BELOW_NORMAL (Gaming Mode) o NORMAL (Balance)."""
     try:
@@ -1537,6 +1760,8 @@ def attiva_modalita_prestazioni() -> str:
 
     ottimizzazioni_reg = applica_ottimizzazioni_registro_gaming()
     fps_cap = applica_fps_cap_gaming()
+    timer_res = imposta_timer_resolution_gaming(True)
+    islc_guard = avvia_guardiano_islc()
     imposta_priorita_processo_corrente(True)
     throttled = imposta_priorita_background_gaming(True)
 
@@ -1580,6 +1805,13 @@ def attiva_modalita_prestazioni() -> str:
         righe.append(f"Ottimizzazioni Windows (HKCU): {', '.join(ottimizzazioni_reg)}.")
     if fps_cap.get("applicato") and fps_cap.get("messaggio"):
         righe.append(fps_cap["messaggio"])
+    if timer_res.get("messaggio"):
+        righe.append(timer_res["messaggio"])
+    if islc_guard:
+        righe.append(
+            f"Guardiano Standby RAM (ISLC) attivo: svuotamento automatico se Standby >= {ISLC_STANDBY_THRESHOLD_MB} MB "
+            f"e Libera <= {ISLC_FREE_THRESHOLD_MB} MB."
+        )
     righe.append(
         f"Processi chiusi: {', '.join(sorted(chiusi)) if chiusi else 'Nessuno'} "
         f"| RAM liberata: {_formatta_ram_liberata(ram_liberata)}."
@@ -1609,6 +1841,9 @@ def ripristina_modalita_bilanciata() -> str:
     )
     ripristinati = ripristina_ottimizzazioni_registro_gaming()
     extra_fps = ripristina_fps_cap_gaming()
+    timer_rest = imposta_timer_resolution_gaming(False)
+    extra_timer = timer_rest.get("messaggio", "") if timer_rest else ""
+    ferma_guardiano_islc()
     imposta_priorita_processo_corrente(False)
     imposta_priorita_background_gaming(False)
 
@@ -1618,7 +1853,7 @@ def ripristina_modalita_bilanciata() -> str:
     _salva_gaming_state(stato)
 
     extra_reg = f" Ripristinate {ripristinati} impostazioni Windows (notifiche/GameBar)." if ripristinati else ""
-    return f"Piano energetico riportato su '{target_nome}'.{extra_reg}{extra_fps} Telemetria standard ({TELEMETRY_INTERVAL_NORMAL}s) e priorità normale ripristinate."
+    return f"Piano energetico riportato su '{target_nome}'.{extra_reg}{extra_fps}{extra_timer} Telemetria standard ({TELEMETRY_INTERVAL_NORMAL}s) e priorità normale ripristinate."
 
 
 _SERVIZI_IN_PAUSA: list[str] = []
@@ -1665,7 +1900,7 @@ def _stato_servizi_dettaglio(nomi: tuple[str, ...] | list[str]) -> dict[str, str
 
 
 def stato_ottimizzazioni_gaming() -> dict:
-    """Restituisce lo stato reale e una riga di riepilogo per la barra Gaming (FPS Cap, Servizi BG, HAGS, DLDSR)."""
+    """Restituisce lo stato reale, i badge strutturati (2x4) e il riepilogo testuale per la barra Gaming."""
     ok_frl, frl_val = _nvapi_drs_frl_fps("get")
     fps_cap = frl_val if (ok_frl and isinstance(frl_val, int) and frl_val > 0) else None
 
@@ -1681,14 +1916,27 @@ def stato_ottimizzazioni_gaming() -> dict:
     mon = info_monitor_principale()
     dldsr_on = bool(mon.get("dldsr_attivo", False))
     dldsr_res = mon.get("risoluzioni_dldsr", [])
+    timer_ms = leggi_timer_resolution_ms()
+    timer_opt = bool(_TIMER_RES_ACTIVE or (timer_ms is not None and timer_ms <= 1.0))
+    mem_sb = leggi_memoria_standby()
+    standby_mb = mem_sb.get("standby_mb")
+    free_mb = mem_sb.get("free_mb")
+    standby_alta = (
+        standby_mb is not None
+        and standby_mb >= ISLC_STANDBY_THRESHOLD_MB
+        and (free_mb is None or free_mb <= ISLC_FREE_THRESHOLD_MB)
+    )
 
     fps_txt = f"FPS Cap {fps_cap} ●" if fps_cap else "FPS Cap OFF ○"
     if len(in_pausa) == tot_svc and tot_svc > 0:
         svc_txt = f"Servizi BG: Pausa ({len(in_pausa)}/{tot_svc}) ●"
+        svc_st = "on"
     elif in_pausa:
         svc_txt = f"Servizi BG: Pausa ({len(in_pausa)}/{tot_svc}) ◐"
+        svc_st = "warn"
     else:
         svc_txt = f"Servizi BG: Attivi ({len(attivi)}/{tot_svc}) ○"
+        svc_st = "off"
 
     hags_txt = "HAGS: ON ●" if hags is True else ("HAGS: OFF ○" if hags is False else "HAGS: N/D")
     if dldsr_on:
@@ -1699,18 +1947,54 @@ def stato_ottimizzazioni_gaming() -> dict:
     physx_txt = "PhysX: GPU ●" if physx_auto is False else ("PhysX: Auto ○" if physx_auto is True else "PhysX: N/D")
     vbs_txt = "VBS/CoreIso: ON ●" if vbs_on is True else ("VBS/CoreIso: OFF ○" if vbs_on is False else "VBS/CoreIso: N/D")
 
+    if timer_ms is not None:
+        timer_txt = f"Timer: {timer_ms:.2f}ms {'●' if timer_opt else '○'}"
+    else:
+        timer_txt = "Timer: N/D"
+
+    if standby_mb is not None:
+        standby_txt = f"Standby: {standby_mb} MB {'!' if standby_alta else '●'}"
+        standby_st = "warn" if standby_alta else "on"
+    else:
+        standby_txt = "Standby: N/D"
+        standby_st = "off"
+
+    def _badge(bid: str, testo: str, stato: str) -> dict:
+        if stato == "on":
+            return {"id": bid, "testo": testo, "fg": "#81c784", "bg": "#1a2b1d"}
+        if stato == "warn":
+            return {"id": bid, "testo": testo, "fg": "#ffb74d", "bg": "#2b2417"}
+        return {"id": bid, "testo": testo, "fg": "#9e9e9e", "bg": "#202020"}
+
+    badges = [
+        _badge("fps", fps_txt, "on" if fps_cap else "off"),
+        _badge("timer", timer_txt, "on" if timer_opt else "off"),
+        _badge("standby", standby_txt, standby_st),
+        _badge("svc", svc_txt, svc_st),
+        _badge("hags", hags_txt, "on" if hags is True else "off"),
+        _badge("dldsr", dldsr_txt, "on" if dldsr_on else "off"),
+        _badge("physx", physx_txt, "on" if physx_auto is False else "off"),
+        _badge("vbs", vbs_txt, "on" if vbs_on is True else ("warn" if vbs_on is False else "off")),
+    ]
+
     attivi_count = sum([
         bool(fps_cap),
+        timer_opt,
         len(in_pausa) > 0,
         hags is True,
         dldsr_on,
         physx_auto is False,
         vbs_on is True,
     ])
-    colore = "#81c784" if attivi_count >= 3 else ("#ffb74d" if attivi_count >= 1 else "#9e9e9e")
+    colore = "#81c784" if attivi_count >= 4 else ("#ffb74d" if attivi_count >= 1 else "#9e9e9e")
 
     return {
         "fps_cap": fps_cap,
+        "timer_ms": timer_ms,
+        "timer_ottimizzato": timer_opt,
+        "standby_mb": standby_mb,
+        "free_mb": free_mb,
+        "standby_alta": standby_alta,
         "servizi_in_pausa": in_pausa,
         "servizi_attivi": attivi,
         "hags": hags,
@@ -1720,7 +2004,8 @@ def stato_ottimizzazioni_gaming() -> dict:
         "vbs_hvci_attivo": vbs_on,
         "dldsr_attivo": dldsr_on,
         "risoluzioni_dldsr": dldsr_res,
-        "testo_barra": f"Gaming: {fps_txt} | {svc_txt} | {hags_txt} | {dldsr_txt} | {physx_txt} | {vbs_txt}",
+        "badges": badges,
+        "testo_barra": f"Gaming: {fps_txt} | {timer_txt} | {standby_txt} | {svc_txt} | {hags_txt} | {dldsr_txt} | {physx_txt} | {vbs_txt}",
         "colore": colore,
     }
 
@@ -1979,6 +2264,21 @@ def diagnostica_pre_partita(ram_info: dict | None = None, dischi_info: dict | No
             "priorità ridotta a BELOW_NORMAL; chiudi quelli non necessari per questa sessione."
         )
 
+    mem_sb = leggi_memoria_standby()
+    standby_mb = mem_sb.get("standby_mb")
+    free_mb = mem_sb.get("free_mb")
+    standby_alta = (
+        standby_mb is not None
+        and standby_mb >= ISLC_STANDBY_THRESHOLD_MB
+        and (free_mb is None or free_mb <= ISLC_FREE_THRESHOLD_MB)
+    )
+    if standby_alta:
+        free_str = f", RAM libera: {free_mb} MB" if free_mb is not None else ""
+        avvisi.append(
+            f"Standby List RAM elevata ({standby_mb} MB{free_str}): "
+            "svuotarla (stile ISLC) riduce micro-stutter durante il gioco."
+        )
+
     # 6. Bilanciamento CPU-bound / DLDSR su GPU NVIDIA RTX con margine di risoluzione
     consiglia_dldsr = None
     mon = info_monitor_principale()
@@ -2021,6 +2321,9 @@ def diagnostica_pre_partita(ram_info: dict | None = None, dischi_info: dict | No
         "vbs_hvci_attivo": vbs_hvci_attivo,
         "hdd_rilevati": hdd_rilevati,
         "launcher_opzionali_attivi": launcher_opz,
+        "standby_mb": standby_mb,
+        "free_mb": free_mb,
+        "standby_alta": standby_alta,
     }
 
 def pulisci_file_temporanei() -> str:
