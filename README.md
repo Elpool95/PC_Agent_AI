@@ -80,7 +80,7 @@ Puoi modificare soglie di allerta, modelli Gemini, app chiudibili in `Gaming Mod
 - `modules/` — moduli applicativi (`agent_win11.py`, `ai_agent.py`, `tools.py`)
 - `tests/` — suite di test unitari, sicurezza e usabilità GUI
 - `doc/` — documentazione tecnica completa (`architecture.md`, `security.md`, `testing-and-skills.md`, `licenses.md`, `changelog.md`)
-- `reports/` — log runtime e report JUnit XML (`junit.xml`)
+- `reports/` — report di Quality Gate e sicurezza (`quality-security-report.md`), log runtime e JUnit XML locali (`*.log`, `*.xml` ignorati da Git)
 - `.agents/` — regole (`rules/`) e skill (`skills/`) per coding agent
 
 ## Autore, Contributi & Licenza

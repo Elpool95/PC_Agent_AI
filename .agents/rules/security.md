@@ -21,5 +21,5 @@ Ogni volta che viene scritto o modificato codice in questo repository, applicare
 ## 4. Hardening (Irrobustimento)
 - **Minimo privilegio**: l'app deve funzionare da utente standard gestendo `PermissionError` / `AccessDenied` senza crashare.
 - **Logging sicuro**: non scrivere mai chiavi API, token o dati sensibili in console o in `reports/*.log`.
-- **Supply chain & isolamento**: mantenere dipendenze essenziali in `requirements.txt` e usare l'ambiente virtuale isolato `.venv`.
+- **Supply chain & isolamento**: mantenere dipendenze essenziali in `requirements.txt`, usare l'ambiente virtuale isolato `.venv` e verificare le CVE delle dipendenze con `pip-audit` (e `.github/dependabot.yml` su GitHub).
 - **Superficie di attacco ridotta**: esporre a `GeminiAgent` solo i tool strettamente necessari, con type hints chiari e output minimi.
