@@ -68,21 +68,21 @@ class PCAgentGUI:
         btn_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
 
         tk.Button(
-            btn_frame, text="Top Processi CPU", bg="#2d2d30", fg="#ffffff",
+            btn_frame, text="Top CPU Process", bg="#2d2d30", fg="#ffffff",
             activebackground="#3e3e42", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=lambda: threading.Thread(target=self.azione_stato_locale, daemon=True).start()
         ).pack(side=tk.LEFT, padx=4)
 
         tk.Button(
-            btn_frame, text="Archiviazione", bg="#2d2d30", fg="#ffffff",
+            btn_frame, text="Storage", bg="#2d2d30", fg="#ffffff",
             activebackground="#3e3e42", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=lambda: threading.Thread(target=self.azione_dischi_locale, daemon=True).start()
         ).pack(side=tk.LEFT, padx=4)
 
         self.btn_gaming = tk.Button(
-            btn_frame, text="Modalità Gaming", bg="#2d2d30", fg="#ffffff",
+            btn_frame, text="Gaming Mode", bg="#2d2d30", fg="#ffffff",
             activebackground="#3e3e42", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=lambda: threading.Thread(target=self.azione_gaming_locale, daemon=True).start()
@@ -90,7 +90,7 @@ class PCAgentGUI:
         self.btn_gaming.pack(side=tk.LEFT, padx=4)
 
         self.btn_bilanciato = tk.Button(
-            btn_frame, text="Bilanciato", bg="#2d2d30", fg="#ffffff",
+            btn_frame, text="Balance", bg="#2d2d30", fg="#ffffff",
             activebackground="#3e3e42", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=lambda: threading.Thread(target=self.azione_bilanciato_locale, daemon=True).start()
@@ -98,21 +98,21 @@ class PCAgentGUI:
         self.btn_bilanciato.pack(side=tk.LEFT, padx=4)
 
         tk.Button(
-            btn_frame, text="App all'Avvio", bg="#2d2d30", fg="#ffffff",
+            btn_frame, text="Start App", bg="#2d2d30", fg="#ffffff",
             activebackground="#3e3e42", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=lambda: threading.Thread(target=self.azione_avvio_locale, daemon=True).start()
         ).pack(side=tk.LEFT, padx=4)
 
         tk.Button(
-            btn_frame, text="Dettagli RAM", bg="#2d2d30", fg="#ffffff",
+            btn_frame, text="RAM Detail", bg="#2d2d30", fg="#ffffff",
             activebackground="#3e3e42", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=lambda: threading.Thread(target=self.azione_ram_locale, daemon=True).start()
         ).pack(side=tk.LEFT, padx=4)
 
         tk.Button(
-            btn_frame, text="Pulisci Console", bg="#3a2626", fg="#ffffff",
+            btn_frame, text="Clear", bg="#3a2626", fg="#ffffff",
             activebackground="#5a3434", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=self.pulisci_console
@@ -140,7 +140,7 @@ class PCAgentGUI:
         self.entry.bind("<Return>", lambda e: self.invia_messaggio())
 
         self.send_btn = tk.Button(
-            input_frame, text="Invia", bg="#007acc", fg="#ffffff",
+            input_frame, text="Send", bg="#007acc", fg="#ffffff",
             activebackground="#005a9e", activeforeground="#ffffff",
             relief=tk.FLAT, padx=16, pady=6, command=self.invia_messaggio
         )
@@ -185,11 +185,11 @@ class PCAgentGUI:
 
     def _imposta_stato_modalita(self, modalita):
         if modalita == "gaming":
-            self.btn_gaming.config(text="Modalità Gaming ● ATTIVA", bg="#2e7d32", activebackground="#388e3c")
-            self.btn_bilanciato.config(text="Bilanciato", bg="#2d2d30", activebackground="#3e3e42")
+            self.btn_gaming.config(text="Gaming Mode ●", bg="#2e7d32", activebackground="#388e3c")
+            self.btn_bilanciato.config(text="Balance", bg="#2d2d30", activebackground="#3e3e42")
         elif modalita == "bilanciato":
-            self.btn_gaming.config(text="Modalità Gaming", bg="#2d2d30", activebackground="#3e3e42")
-            self.btn_bilanciato.config(text="Bilanciato ● ATTIVO", bg="#0277bd", activebackground="#0288d1")
+            self.btn_gaming.config(text="Gaming Mode", bg="#2d2d30", activebackground="#3e3e42")
+            self.btn_bilanciato.config(text="Balance ●", bg="#0277bd", activebackground="#0288d1")
 
     def _loop_telemetria(self):
         lettere_correnti = tools.elenca_lettere_dischi()
