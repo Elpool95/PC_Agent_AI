@@ -50,7 +50,8 @@ def test_analizza_sistema():
 
 def test_monitora_gpu_success_and_error():
     sample = "NVIDIA GeForce RTX 3070, 12, 41, 1024, 8192, 30.5, 45, 1725, P2\n"
-    with patch("subprocess.check_output", return_value=sample):
+    with patch("modules.tools._monitora_gpu_nvml", return_value=None), \
+         patch("subprocess.check_output", return_value=sample):
         res = tools.monitora_gpu()
     assert res["gpu"] == "NVIDIA GeForce RTX 3070"
     assert res["utilizzo_num"] == 12
@@ -58,9 +59,39 @@ def test_monitora_gpu_success_and_error():
     assert res["ventola_percent"] == "45%"
     assert res["clock_mhz"] == "1725 MHz"
 
-    with patch("subprocess.check_output", side_effect=FileNotFoundError("no smi")):
+    with patch("modules.tools._monitora_gpu_nvml", return_value=None), \
+         patch("subprocess.check_output", side_effect=FileNotFoundError("no smi")):
         err = tools.monitora_gpu()
     assert "errore" in err
+
+
+def test_monitora_gpu_nvml_in_process():
+    fake_nvml = MagicMock()
+    fake_nvml.NVML_TEMPERATURE_GPU = 0
+    fake_nvml.NVML_CLOCK_GRAPHICS = 0
+    fake_nvml.nvmlDeviceGetHandleByIndex.return_value = "h0"
+    fake_nvml.nvmlDeviceGetName.return_value = b"NVIDIA GeForce RTX 3070"
+    fake_nvml.nvmlDeviceGetUtilizationRates.return_value = SimpleNamespace(gpu=35)
+    fake_nvml.nvmlDeviceGetTemperature.return_value = 54
+    fake_nvml.nvmlDeviceGetMemoryInfo.return_value = SimpleNamespace(used=2048 * 1024 * 1024, total=8192 * 1024 * 1024)
+    fake_nvml.nvmlDeviceGetPowerUsage.return_value = 115500
+    fake_nvml.nvmlDeviceGetFanSpeed.return_value = 48
+    fake_nvml.nvmlDeviceGetClockInfo.return_value = 1920
+    fake_nvml.nvmlDeviceGetPerformanceState.return_value = 0
+
+    tools._chiudi_nvml()
+    with patch.dict("sys.modules", {"pynvml": fake_nvml}):
+        res = tools.monitora_gpu()
+    assert res["gpu"] == "NVIDIA GeForce RTX 3070"
+    assert res["utilizzo_num"] == 35
+    assert res["temperatura_num"] == 54
+    assert res["vram_usata_mb"] == "2048"
+    assert res["vram_totale_mb"] == "8192"
+    assert res["consumo_watt"] == "115.50 W"
+    assert res["ventola_percent"] == "48%"
+    assert res["clock_mhz"] == "1920 MHz"
+    assert res["pstate"] == "P0"
+    tools._chiudi_nvml()
 
 
 def test_leggi_sensori_cpu_and_offline():

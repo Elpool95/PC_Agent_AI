@@ -324,3 +324,16 @@ def test_gui_lock_lhm_button_and_action(gui_app):
         root.update()
         assert "Regola creata OK" in app.chat_area.get("1.0", tk.END)
         assert "Locked" in app.btn_lhm_lock.cget("text")
+
+
+def test_gui_minimized_pauses_and_resumes_telemetry(gui_app):
+    app, root, _ = gui_app
+    with patch.object(root, "state", return_value="iconic"):
+        app._on_window_state_change()
+    assert app._window_minimized is True
+
+    app._telemetry_wake.clear()
+    with patch.object(root, "state", return_value="normal"):
+        app._on_window_state_change()
+    assert app._window_minimized is False
+    assert app._telemetry_wake.is_set() is True

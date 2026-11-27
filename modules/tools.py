@@ -1,3 +1,4 @@
+import atexit
 import ctypes
 import json
 import os
@@ -123,8 +124,90 @@ def analizza_sistema(limite: int = 10) -> dict:
         "top_app_ram": top_app_ram,
     }
 
+_NVML_INITIALIZED = False
+_NVML_HANDLE = None
+_NVML_ATEXIT_REGISTERED = False
+
+
+def _chiudi_nvml() -> None:
+    """Chiude in modo pulito la sessione NVML alla chiusura del processo."""
+    global _NVML_INITIALIZED, _NVML_HANDLE
+    if _NVML_INITIALIZED:
+        try:
+            import pynvml
+            pynvml.nvmlShutdown()
+        except Exception:
+            pass
+    _NVML_INITIALIZED = False
+    _NVML_HANDLE = None
+
+
+def _monitora_gpu_nvml() -> dict | None:
+    """Legge la telemetria GPU NVIDIA direttamente in-process via NVML (pynvml) senza creare processi esterni."""
+    global _NVML_INITIALIZED, _NVML_HANDLE, _NVML_ATEXIT_REGISTERED
+    try:
+        import pynvml
+    except Exception:
+        return None
+
+    try:
+        if not _NVML_INITIALIZED or _NVML_HANDLE is None:
+            pynvml.nvmlInit()
+            _NVML_HANDLE = pynvml.nvmlDeviceGetHandleByIndex(0)
+            _NVML_INITIALIZED = True
+            if not _NVML_ATEXIT_REGISTERED:
+                atexit.register(_chiudi_nvml)
+                _NVML_ATEXIT_REGISTERED = True
+
+        h = _NVML_HANDLE
+        nome_raw = pynvml.nvmlDeviceGetName(h)
+        nome = nome_raw.decode("utf-8", errors="ignore") if isinstance(nome_raw, bytes) else str(nome_raw)
+        util_num = int(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
+        temp_num = int(pynvml.nvmlDeviceGetTemperature(h, pynvml.NVML_TEMPERATURE_GPU))
+        mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+        vram_usata = str(int(mem.used // (1024 * 1024)))
+        vram_tot = str(int(mem.total // (1024 * 1024)))
+
+        try:
+            watt_str = f"{pynvml.nvmlDeviceGetPowerUsage(h) / 1000.0:.2f} W"
+        except Exception:
+            watt_str = "N/D"
+        try:
+            fan_str = f"{int(pynvml.nvmlDeviceGetFanSpeed(h))}%"
+        except Exception:
+            fan_str = "N/D"
+        try:
+            clock_str = f"{int(pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_GRAPHICS))} MHz"
+        except Exception:
+            clock_str = "N/D"
+        try:
+            pstate_str = f"P{int(pynvml.nvmlDeviceGetPerformanceState(h))}"
+        except Exception:
+            pstate_str = "N/D"
+
+        return {
+            "gpu": nome.strip(),
+            "utilizzo_percent": f"{util_num}%",
+            "utilizzo_num": util_num,
+            "temperatura_c": f"{temp_num}°C",
+            "temperatura_num": temp_num,
+            "vram_usata_mb": vram_usata,
+            "vram_totale_mb": vram_tot,
+            "consumo_watt": watt_str,
+            "ventola_percent": fan_str,
+            "clock_mhz": clock_str,
+            "pstate": pstate_str,
+        }
+    except Exception:
+        _chiudi_nvml()
+        return None
+
+
 def monitora_gpu() -> dict:
-    """Legge utilizzo, temperatura, VRAM usata/totale, consumo W, ventola % e clock MHz della GPU NVIDIA."""
+    """Legge utilizzo, temperatura, VRAM usata/totale, consumo W, ventola % e clock MHz della GPU NVIDIA (NVML con fallback nvidia-smi)."""
+    nvml_res = _monitora_gpu_nvml()
+    if nvml_res is not None:
+        return nvml_res
     try:
         smi = _trova_nvidia_smi()
         cmd = [

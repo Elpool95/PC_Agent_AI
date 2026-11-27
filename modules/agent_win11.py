@@ -181,10 +181,25 @@ class PCAgentGUI:
         self.dischi_info_hw = {}
         self._telemetry_interval = config.TELEMETRY_INTERVAL_NORMAL
         self._telemetry_wake = threading.Event()
+        self._window_minimized = False
+
+        self.root.bind("<Unmap>", self._on_window_state_change)
+        self.root.bind("<Map>", self._on_window_state_change)
 
         psutil.cpu_percent(interval=None)
         threading.Thread(target=self._carica_info_hw, daemon=True).start()
         threading.Thread(target=self._loop_telemetria, daemon=True).start()
+
+    def _on_window_state_change(self, _event=None):
+        """Sospende il polling telemetria quando la finestra è minimizzata e lo riattiva subito al ripristino."""
+        try:
+            minimized = self.root.state() == "iconic"
+        except Exception:
+            minimized = False
+        if minimized != self._window_minimized:
+            self._window_minimized = minimized
+            if not minimized:
+                self._telemetry_wake.set()
 
     def _carica_info_hw(self):
         info = tools.info_versioni_sistema()
@@ -286,6 +301,8 @@ class PCAgentGUI:
         while True:
             self._telemetry_wake.wait(timeout=self._telemetry_interval)
             self._telemetry_wake.clear()
+            if self._window_minimized:
+                continue
             ciclo += 1
             try:
                 now = time.time()

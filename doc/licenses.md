@@ -10,12 +10,15 @@
 | :--- | :--- | :--- | :--- |
 | `psutil` | `>=5.9.0` | **BSD-3-Clause** | Telemetria CPU, RAM, dischi, rete e processi |
 | `google-genai` | `>=1.0.0` | **Apache-2.0** | SDK ufficiale Google Gemini API |
+| `nvidia-ml-py` | `>=12.0.0` | **BSD-3-Clause** | Binding ufficiale NVML per telemetria GPU NVIDIA in-process |
 
 ## Dipendenze Python (sviluppo e test)
 | Pacchetto | Versione minima | Licenza | Note |
 | :--- | :--- | :--- | :--- |
 | `pytest` | `>=8.0.0` | **MIT** | Runner test unitari e report JUnit XML |
 | `pytest-cov` | `>=5.0.0` | **MIT** | Calcolo code coverage (`>= 80%`) |
+| `pip-audit` | `>=2.7.0` | **Apache-2.0** | Audit automatico CVE/GHSA sulle dipendenze |
+| `bandit` | `>=1.7.0` | **Apache-2.0** | Analisi statica SAST (AST Python) |
 
 ## Strumenti esterni opzionali (non distribuiti nel repository)
 | Strumento | Licenza | Modalità d'uso |
