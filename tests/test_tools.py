@@ -232,11 +232,13 @@ def test_gaming_registro_hkcu_e_rollback(tmp_path):
     # Prima chiave esisteva (=1), le altre non esistevano (FileNotFoundError)
     query_side = [(1, 4), FileNotFoundError(), FileNotFoundError(), (1, 4)]
     with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools.abilita_vrr_windows", return_value=True), \
          patch("winreg.CreateKeyEx", return_value=mock_key), \
          patch("winreg.QueryValueEx", side_effect=query_side), \
          patch("winreg.SetValueEx") as mock_set:
         applicati = tools.applica_ottimizzazioni_registro_gaming()
-    assert len(applicati) == 4
+    assert len(applicati) == 5
+    assert "VRR & Windowed Opt ON" in applicati
     assert mock_set.call_count == 4
     assert len(tools._GAMING_REG_SNAPSHOT) == 4
     assert os.path.isfile(state_file)
@@ -462,6 +464,7 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
     # Caso tutto OK
     ram_ok = {"banchi": [{"gb": 8}, {"gb": 8}], "modalita_canale": "Dual Channel", "tipo": "DDR4", "frequenza_mhz": 3200}
     with patch("modules.tools._leggi_hags_attivo", return_value=True), \
+         patch("modules.tools._leggi_vrr_attivo", return_value=True), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
          patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=50.0, free=200 * 1024**3)), \
@@ -471,9 +474,10 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
     assert res_ok["ok"] is True
     assert "tutto OK" in res_ok["testo"]
 
-    # Caso con colli di bottiglia reali (HAGS off, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
+    # Caso con colli di bottiglia reali (HAGS off, VRR off, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
     ram_slow = {"banchi": [{"gb": 8}], "modalita_canale": "Single Channel", "tipo": "DDR4", "frequenza_mhz": 2133}
     with patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch("modules.tools._leggi_vrr_attivo", return_value=False), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Wi-Fi", "ip": "192.168.1.5", "link_mbps": 300}), \
          patch("modules.tools.misura_ping", return_value={"ms": 85, "stato": "85 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=95.0, free=10 * 1024**3)), \
@@ -481,11 +485,39 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
          patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "80,5 °C"}):
         res_warn = tools.diagnostica_pre_partita(ram_slow)
     assert res_warn["ok"] is False
-    assert len(res_warn["avvisi"]) == 8
+    assert len(res_warn["avvisi"]) == 9
     assert "HAGS" in res_warn["testo"]
+    assert "VRR" in res_warn["testo"]
     assert "Wi-Fi" in res_warn["testo"]
     assert "Single Channel" in res_warn["testo"]
     assert "XMP/EXPO" in res_warn["testo"]
+
+
+def test_vrr_windows_parse_leggi_e_abilita():
+    assert tools._parse_directx_global_settings("SwapEffectUpgradeEnable=1;CustomFlag=0;") == {
+        "SwapEffectUpgradeEnable": "1",
+        "CustomFlag": "0",
+    }
+
+    mock_key = MagicMock()
+    mock_key.__enter__.return_value = mock_key
+
+    with patch("winreg.OpenKey", return_value=mock_key), \
+         patch("winreg.QueryValueEx", return_value=("SwapEffectUpgradeEnable=1;VRROptimizeEnable=1;", 1)):
+        assert tools._leggi_vrr_attivo() is True
+
+    with patch("winreg.OpenKey", return_value=mock_key), \
+         patch("winreg.QueryValueEx", return_value=("SwapEffectUpgradeEnable=1;", 1)):
+        assert tools._leggi_vrr_attivo() is False
+
+    with patch("winreg.CreateKeyEx", return_value=mock_key), \
+         patch("winreg.QueryValueEx", return_value=("CustomFlag=1;SwapEffectUpgradeEnable=1;", 1)), \
+         patch("winreg.SetValueEx") as mock_set:
+        assert tools.abilita_vrr_windows() is True
+    scritto = mock_set.call_args[0][4]
+    assert "CustomFlag=1;" in scritto
+    assert "SwapEffectUpgradeEnable=1;" in scritto
+    assert "VRROptimizeEnable=1;" in scritto
 
 
 def test_abilita_hags():

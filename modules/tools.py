@@ -659,6 +659,56 @@ def _ottimizza_piano_gaming(guid: str) -> list[str]:
     return applicati
 
 
+_DIRECTX_PREFS_PATH = r"Software\Microsoft\DirectX\UserGpuPreferences"
+_DIRECTX_GLOBAL_VAL = "DirectXUserGlobalSettings"
+
+
+def _parse_directx_global_settings(raw: str) -> dict[str, str]:
+    """Parsa la stringa DirectXUserGlobalSettings (es. 'SwapEffectUpgradeEnable=1;VRROptimizeEnable=1;')."""
+    risultato: dict[str, str] = {}
+    for token in str(raw or "").split(";"):
+        token = token.strip()
+        if "=" in token:
+            k, v = token.split("=", 1)
+            k = k.strip()
+            if k:
+                risultato[k] = v.strip()
+    return risultato
+
+
+def _leggi_vrr_attivo() -> bool | None:
+    """Verifica se VRR di Windows (VRROptimizeEnable=1) è attivo in HKCU."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _DIRECTX_PREFS_PATH, 0, winreg.KEY_READ) as key:
+            raw, _ = winreg.QueryValueEx(key, _DIRECTX_GLOBAL_VAL)
+            settings = _parse_directx_global_settings(str(raw))
+            return settings.get("VRROptimizeEnable") == "1"
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return None
+
+
+def abilita_vrr_windows() -> bool:
+    """Abilita VRR (VRROptimizeEnable=1) e Ottimizzazioni giochi in finestra (SwapEffectUpgradeEnable=1) su HKCU senza UAC."""
+    try:
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, _DIRECTX_PREFS_PATH, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE
+        ) as key:
+            try:
+                raw, _ = winreg.QueryValueEx(key, _DIRECTX_GLOBAL_VAL)
+            except FileNotFoundError:
+                raw = ""
+            settings = _parse_directx_global_settings(str(raw))
+            settings["SwapEffectUpgradeEnable"] = "1"
+            settings["VRROptimizeEnable"] = "1"
+            nuova_str = "".join(f"{k}={v};" for k, v in settings.items())
+            winreg.SetValueEx(key, _DIRECTX_GLOBAL_VAL, 0, winreg.REG_SZ, nuova_str)
+            return True
+    except Exception:
+        return False
+
+
 def applica_ottimizzazioni_registro_gaming() -> list[str]:
     """Applica ottimizzazioni Windows Gaming su HKCU (senza UAC) salvando lo stato precedente anche su disco."""
     stato = _carica_gaming_state()
@@ -686,6 +736,9 @@ def applica_ottimizzazioni_registro_gaming() -> list[str]:
                 applicati.append(etichetta)
         except Exception:
             pass
+
+    if abilita_vrr_windows():
+        applicati.append("VRR & Windowed Opt ON")
 
     if _GAMING_REG_SNAPSHOT:
         stato["reg_snapshot"] = {
@@ -971,10 +1024,14 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
     """Esegue un check-up rapido (sola lettura, zero UAC) segnalando solo eventuali colli di bottiglia reali."""
     avvisi = []
 
-    # 1. HAGS (Hardware-Accelerated GPU Scheduling)
+    # 1. HAGS (Hardware-Accelerated GPU Scheduling) e VRR Windows
     hags = _leggi_hags_attivo()
     if hags is False:
         avvisi.append("HAGS non attivo: abilitalo in Impostazioni > Schermo > Grafica per ridurre la latenza GPU.")
+
+    vrr = _leggi_vrr_attivo()
+    if vrr is False:
+        avvisi.append("VRR (Frequenza di aggiornamento variabile) non attivo in Windows.")
 
     # 2. Rete (Wi-Fi / Offline / Ping alto)
     rete = info_rete_attiva()
