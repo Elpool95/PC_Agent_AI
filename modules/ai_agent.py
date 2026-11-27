@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Elpool95
+# SPDX-License-Identifier: MIT
+
 import psutil
 import time
 from google import genai

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Elpool95
+# SPDX-License-Identifier: MIT
+
 import atexit
 import ctypes
 import json
@@ -1694,7 +1697,7 @@ def stato_ottimizzazioni_gaming() -> dict:
     else:
         dldsr_txt = "DLDSR: OFF ○"
     physx_txt = "PhysX: GPU ●" if physx_auto is False else ("PhysX: Auto ○" if physx_auto is True else "PhysX: N/D")
-    vbs_txt = "VBS/CoreIso: OFF ●" if vbs_on is False else ("VBS/CoreIso: ON ○" if vbs_on is True else "VBS/CoreIso: N/D")
+    vbs_txt = "VBS/CoreIso: ON ●" if vbs_on is True else ("VBS/CoreIso: OFF ○" if vbs_on is False else "VBS/CoreIso: N/D")
 
     attivi_count = sum([
         bool(fps_cap),
@@ -1702,7 +1705,7 @@ def stato_ottimizzazioni_gaming() -> dict:
         hags is True,
         dldsr_on,
         physx_auto is False,
-        vbs_on is False,
+        vbs_on is True,
     ])
     colore = "#81c784" if attivi_count >= 3 else ("#ffb74d" if attivi_count >= 1 else "#9e9e9e")
 
@@ -1904,11 +1907,11 @@ def diagnostica_pre_partita(ram_info: dict | None = None, dischi_info: dict | No
 
     vbs_info = _leggi_stato_vbs_hvci()
     vbs_hvci_attivo = vbs_info.get("attivo")
-    if vbs_hvci_attivo is True:
+    if vbs_hvci_attivo is False:
         avvisi.append(
-            "Integrità della memoria (Isolamento core / VBS) attiva: su CPU meno recenti può ridurre gli FPS "
-            "e aumentare la latenza. Valuta di disattivarla in Sicurezza di Windows > Sicurezza dispositivi > "
-            "Isolamento core (abbassa leggermente la protezione da malware avanzati, richiede riavvio)."
+            "VBS / Integrità della memoria (Isolamento core) non attivo: è necessario per gli anti-cheat "
+            "moderni (es. Riot Vanguard) e protegge da accessi non autorizzati. Attivalo in "
+            "Sicurezza di Windows > Sicurezza dispositivi > Isolamento core."
         )
 
     # 2. Rete (Wi-Fi / Offline / Ping alto)

@@ -1,9 +1,10 @@
 # Licenze & Attribuzioni — PC Agent AI
 
-## Licenza del progetto
-- **Progetto**: PC Agent AI
-- **Autore**: Elpool95 (`https://github.com/Elpool95/PC_Agent_AI`)
-- **Licenza**: **MIT License** (vedi file `LICENSE` nella root del repository)
+## Licenza e Copyright del progetto
+- **Progetto**: Elpool Agent PC (PC Agent AI)
+- **Copyright**: `Copyright (c) 2026 Elpool95` (`https://github.com/Elpool95/PC_Agent_AI`)
+- **Licenza**: **MIT License** (`SPDX-License-Identifier: MIT`, vedi file `LICENSE` nella root del repository)
+- **Asset grafici**: `doc/assets/elpool-agent-pc-logo.png` e `doc/assets/icon.ico` — `Copyright (c) 2026 Elpool95` (tutti i diritti riservati al progetto Elpool Agent PC)
 
 ## Dipendenze Python (runtime)
 | Pacchetto | Versione minima | Licenza | Note |

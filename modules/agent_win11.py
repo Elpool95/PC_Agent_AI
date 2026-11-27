@@ -1,3 +1,7 @@
+# Copyright (c) 2026 Elpool95
+# SPDX-License-Identifier: MIT
+
+import os
 import threading
 import time
 import tkinter as tk
@@ -14,6 +18,12 @@ class PCAgentGUI:
         self.root.geometry("900x760")
         self.root.minsize(820, 620)
         self.root.configure(bg="#1e1e1e")
+        icon_path = os.path.join(config.BASE_DIR, "doc", "assets", "icon.ico")
+        if os.path.isfile(icon_path):
+            try:
+                self.root.iconbitmap(icon_path)
+            except Exception:
+                pass
 
         self.agent = None
 
@@ -626,23 +636,23 @@ class PCAgentGUI:
                 )
 
         vbs_attivo = checkup.get("vbs_hvci_attivo")
-        if vbs_attivo is False:
+        if vbs_attivo is True:
             self.root.after(
                 0, self.aggiungi_testo, "Sistema",
-                "Integrità della memoria (VBS / Isolamento core): OFF ●.\n"
+                "VBS / Integrità della memoria (Isolamento core): ON ● (richiesto per anti-cheat e protezione sistema).\n"
             )
-        elif vbs_attivo is True:
+        elif vbs_attivo is False:
             if self._chiedi_conferma_utente(
-                "Integrità della memoria (Isolamento core / VBS) è attualmente attiva.\n\n"
-                "Disattivarla può recuperare FPS e ridurre la latenza (soprattutto su CPU meno recenti), "
-                "ma abbassa leggermente la protezione da malware avanzati e richiede un riavvio.\n\n"
-                "Vuoi aprire ora Sicurezza di Windows > Isolamento core per valutarla?"
+                "VBS / Integrità della memoria (Isolamento core) risulta attualmente disattivo.\n\n"
+                "Mantenerlo attivo è necessario per gli anti-cheat moderni (es. Riot Vanguard) "
+                "e aiuta a proteggere il sistema da accessi non autorizzati (richiede riavvio).\n\n"
+                "Vuoi aprire ora Sicurezza di Windows > Isolamento core per attivarlo?"
             ):
                 if tools.apri_isolamento_core_windows():
                     self.root.after(
                         0, self.aggiungi_testo, "Sistema",
-                        "Sicurezza di Windows > Isolamento core aperto: valuta 'Integrità della memoria' "
-                        "e riavvia il PC se scegli di modificarla.\n"
+                        "Sicurezza di Windows > Isolamento core aperto: attiva 'Integrità della memoria' "
+                        "e riavvia il PC per garantire compatibilità anti-cheat e sicurezza.\n"
                     )
                 else:
                     self.root.after(
@@ -653,7 +663,7 @@ class PCAgentGUI:
             else:
                 self.root.after(
                     0, self.aggiungi_testo, "Sistema",
-                    "Integrità della memoria (VBS / Isolamento core) lasciata attiva su scelta utente ○.\n"
+                    "VBS / Integrità della memoria (Isolamento core) lasciato disattivo su scelta utente ○.\n"
                 )
 
         self._aggiorna_barra_gaming_async()

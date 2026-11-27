@@ -521,7 +521,7 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
     with patch("modules.tools._leggi_hags_attivo", return_value=True), \
          patch("modules.tools._leggi_vrr_attivo", return_value=True), \
          patch("modules.tools._leggi_physx_auto", return_value=False), \
-         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": False, "hvci_attivo": False, "attivo": False}), \
+         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
          patch("modules.tools._launcher_opzionali_attivi", return_value=[]), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
          patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
@@ -532,16 +532,16 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
         res_ok = tools.diagnostica_pre_partita(ram_ok, dischi_ssd)
     assert res_ok["ok"] is True
     assert res_ok["consiglia_dldsr"] is None
-    assert res_ok["vbs_hvci_attivo"] is False
+    assert res_ok["vbs_hvci_attivo"] is True
     assert res_ok["hdd_rilevati"] == []
     assert "tutto OK" in res_ok["testo"]
 
-    # Caso con colli di bottiglia reali (HAGS off, VRR off, PhysX Auto, VBS/HVCI on, HDD + WSearch, launcher secondari, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
+    # Caso con colli di bottiglia reali (HAGS off, VRR off, PhysX Auto, VBS/HVCI off, HDD + WSearch, launcher secondari, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
     ram_slow = {"banchi": [{"gb": 8}], "modalita_canale": "Single Channel", "tipo": "DDR4", "frequenza_mhz": 2133}
     with patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch("modules.tools._leggi_vrr_attivo", return_value=False), \
          patch("modules.tools._leggi_physx_auto", return_value=True), \
-         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
+         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": False, "hvci_attivo": False, "attivo": False}), \
          patch("modules.tools._stato_servizi_dettaglio", return_value={"WSearch": "running"}), \
          patch("modules.tools._launcher_opzionali_attivi", return_value=["EpicGamesLauncher.exe"]), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Wi-Fi", "ip": "192.168.1.5", "link_mbps": 300}), \
@@ -553,13 +553,14 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
         res_warn = tools.diagnostica_pre_partita(ram_slow, dischi_hdd)
     assert res_warn["ok"] is False
     assert len(res_warn["avvisi"]) == 13
-    assert res_warn["vbs_hvci_attivo"] is True
+    assert res_warn["vbs_hvci_attivo"] is False
     assert res_warn["hdd_rilevati"] == ["D"]
     assert res_warn["launcher_opzionali_attivi"] == ["EpicGamesLauncher.exe"]
     assert "HAGS" in res_warn["testo"]
     assert "VRR" in res_warn["testo"]
     assert "PhysX" in res_warn["testo"]
     assert "Isolamento core" in res_warn["testo"]
+    assert "anti-cheat" in res_warn["testo"]
     assert "HDD rilevato (D:)" in res_warn["testo"]
     assert "EpicGamesLauncher.exe" in res_warn["testo"]
     assert "Wi-Fi" in res_warn["testo"]
@@ -685,7 +686,7 @@ def test_diagnostica_dldsr_cpu_bound_e_monitor():
     with patch("modules.tools._leggi_hags_attivo", return_value=True), \
          patch("modules.tools._leggi_vrr_attivo", return_value=True), \
          patch("modules.tools._leggi_physx_auto", return_value=False), \
-         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": False, "hvci_attivo": False, "attivo": False}), \
+         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
          patch("modules.tools._launcher_opzionali_attivi", return_value=[]), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
          patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
@@ -711,7 +712,7 @@ def test_stato_ottimizzazioni_gaming():
          patch("modules.tools._stato_servizi_dettaglio", return_value={"WSearch": "stopped", "SysMain": "stopped", "DiagTrack": "stopped"}), \
          patch("modules.tools._leggi_hags_attivo", return_value=True), \
          patch("modules.tools._leggi_physx_auto", return_value=False), \
-         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": False, "hvci_attivo": False, "attivo": False}), \
+         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
          patch("modules.tools.info_monitor_principale", return_value={"dldsr_attivo": True, "risoluzioni_dldsr": ["3413x1440"]}):
         st_on = tools.stato_ottimizzazioni_gaming()
     assert "FPS Cap 72 ●" in st_on["testo_barra"]
@@ -719,7 +720,7 @@ def test_stato_ottimizzazioni_gaming():
     assert "HAGS: ON ●" in st_on["testo_barra"]
     assert "DLDSR: ON (3413x1440) ●" in st_on["testo_barra"]
     assert "PhysX: GPU ●" in st_on["testo_barra"]
-    assert "VBS/CoreIso: OFF ●" in st_on["testo_barra"]
+    assert "VBS/CoreIso: ON ●" in st_on["testo_barra"]
     assert st_on["colore"] == "#81c784"
 
     # Tutto spento (grigio)
@@ -727,7 +728,7 @@ def test_stato_ottimizzazioni_gaming():
          patch("modules.tools._stato_servizi_dettaglio", return_value={"WSearch": "running", "SysMain": "running", "DiagTrack": "running"}), \
          patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch("modules.tools._leggi_physx_auto", return_value=True), \
-         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": True, "hvci_attivo": True, "attivo": True}), \
+         patch("modules.tools._leggi_stato_vbs_hvci", return_value={"vbs_attivo": False, "hvci_attivo": False, "attivo": False}), \
          patch("modules.tools.info_monitor_principale", return_value={"dldsr_attivo": False, "risoluzioni_dldsr": []}):
         st_off = tools.stato_ottimizzazioni_gaming()
     assert "FPS Cap OFF ○" in st_off["testo_barra"]
@@ -735,7 +736,7 @@ def test_stato_ottimizzazioni_gaming():
     assert "HAGS: OFF ○" in st_off["testo_barra"]
     assert "DLDSR: OFF ○" in st_off["testo_barra"]
     assert "PhysX: Auto ○" in st_off["testo_barra"]
-    assert "VBS/CoreIso: ON ○" in st_off["testo_barra"]
+    assert "VBS/CoreIso: OFF ○" in st_off["testo_barra"]
     assert st_off["colore"] == "#9e9e9e"
 
 

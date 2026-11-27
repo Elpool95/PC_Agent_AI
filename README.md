@@ -34,7 +34,7 @@ Su PC con componenti non più recentissimi ogni singolo ciclo di CPU, picco di I
     - Applica ottimizzazioni Windows HKCU senza UAC (Game Mode ON, Game DVR OFF, Notifiche Toast / Non Disturbare / Suoni Notifiche OFF, Trasparenze DWM / Animazioni UI OFF, VRR & Windowed Opt ON).
     - Imposta automaticamente il **Limite FPS NVIDIA (`Max Frame Rate`)** via `NVAPI DRS` (senza UAC) in base al refresh rate del monitor principale (`Hz - 3`), ripristinandolo su `Balance`.
     - Chiude in sicurezza browser, app background non protette e overlay superflui (`GameBar`, `Overwolf`, `NVIDIA Share/Overlay`, `Medal`), abbassa a `BELOW_NORMAL` la priorità di app e launcher secondari tenuti aperti (es. Discord, SteamWebHelper, Epic, EA App, Ubisoft, Battle.net, GOG, Xbox) e di PC Agent AI stesso, pulisce i file temporanei e propone la pausa temporanea dei servizi Windows pesanti (`WSearch`, `SysMain`, `DiagTrack` via UAC, segnalando in particolare `WSearch` in presenza di dischi meccanici HDD).
-    - Esegue un **Check-up pre-partita** su HAGS, VRR, PhysX (percorso DCH), **VBS / Integrità della memoria (Isolamento core)** con apertura guidata in Sicurezza di Windows, DLDSR su sistemi CPU-bound, dischi HDD con indicizzazione attiva, launcher secondari, rete/ping, spazio dischi, temperature e RAM, con feedback esplicito in console su ogni scelta.
+    - Esegue un **Check-up pre-partita** su HAGS, VRR, PhysX (percorso DCH), **VBS / Integrità della memoria (Isolamento core)** (verifica che sia attivo per compatibilità anti-cheat e protezione da accessi non autorizzati, con apertura guidata in Sicurezza di Windows), DLDSR su sistemi CPU-bound, dischi HDD con indicizzazione attiva, launcher secondari, rete/ping, spazio dischi, temperature e RAM, con feedback esplicito in console su ogni scelta.
   - `Start App`: elenca le applicazioni all'avvio automatico di Windows.
   - `RAM Detail`: report completo su RAM fisica, paging e moduli installati.
   - `Lock LHM`: verifica l'esposizione sulla LAN della porta `8085` di LibreHardwareMonitor e la blocca via Windows Firewall mantenendo attivo `localhost`.
@@ -83,9 +83,9 @@ Puoi modificare soglie di allerta, modelli Gemini, app chiudibili in `Gaming Mod
 - `reports/` — report di Quality Gate e sicurezza (`quality-security-report.md`), log runtime e JUnit XML locali (`*.log`, `*.xml` ignorati da Git)
 - `.agents/` — regole (`rules/`) e skill (`skills/`) per coding agent
 
-## Autore, Contributi & Licenza
+## Autore, Copyright & Licenza
 
-- **Autore**: Elpool95
+- **Autore & Copyright**: `Copyright (c) 2026 Elpool95` — tutti i file sorgente e gli asset grafici (`doc/assets/`) sono rilasciati sotto licenza del progetto.
 - **Contribuire**: leggi le linee guida in [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Sicurezza**: per segnalare vulnerabilità consulta [SECURITY.md](SECURITY.md) (e i dettagli tecnici in [doc/security.md](doc/security.md))
-- **Licenza**: [MIT License](LICENSE) — per l'elenco completo delle licenze di terze parti (`psutil` BSD-3-Clause, `google-genai` Apache-2.0, `pytest` MIT, ecc.) vedi [doc/licenses.md](doc/licenses.md).
+- **Licenza**: [MIT License](LICENSE) (`SPDX-License-Identifier: MIT`) — per l'elenco completo delle licenze di terze parti (`psutil` BSD-3-Clause, `google-genai` Apache-2.0, `nvidia-ml-py` BSD-3-Clause, `pytest` MIT, ecc.) vedi [doc/licenses.md](doc/licenses.md).

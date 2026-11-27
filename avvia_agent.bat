@@ -1,4 +1,5 @@
 @echo off
+:: Copyright (c) 2026 Elpool95 | SPDX-License-Identifier: MIT
 cd /d "%~dp0"
 
 if exist "%~dp0.venv\Scripts\pythonw.exe" (
