@@ -1245,6 +1245,67 @@ def ha_servizi_gaming_in_pausa() -> bool:
     return bool(_servizi_salvati_da_riavviare())
 
 
+def _stato_servizi_dettaglio(nomi: tuple[str, ...] | list[str]) -> dict[str, str]:
+    """Legge lo stato reale ('running', 'stopped', ecc.) di ciascun servizio Windows indicato."""
+    esiti = {}
+    for nome in nomi:
+        try:
+            esiti[nome] = psutil.win_service_get(nome).status()
+        except Exception:
+            esiti[nome] = "n/d"
+    return esiti
+
+
+def stato_ottimizzazioni_gaming() -> dict:
+    """Restituisce lo stato reale e una riga di riepilogo per la barra Gaming (FPS Cap, Servizi BG, HAGS, DLDSR)."""
+    ok_frl, frl_val = _nvapi_drs_frl_fps("get")
+    fps_cap = frl_val if (ok_frl and isinstance(frl_val, int) and frl_val > 0) else None
+
+    stati_svc = _stato_servizi_dettaglio(GAMING_PAUSABLE_SERVICES)
+    tot_svc = len(GAMING_PAUSABLE_SERVICES)
+    in_pausa = [s for s, st in stati_svc.items() if st == "stopped"]
+    attivi = [s for s, st in stati_svc.items() if st == "running"]
+
+    hags = _leggi_hags_attivo()
+    mon = info_monitor_principale()
+    dldsr_on = bool(mon.get("dldsr_attivo", False))
+    dldsr_res = mon.get("risoluzioni_dldsr", [])
+
+    fps_txt = f"FPS Cap {fps_cap} ●" if fps_cap else "FPS Cap OFF ○"
+    if len(in_pausa) == tot_svc and tot_svc > 0:
+        svc_txt = f"Servizi BG: Pausa ({len(in_pausa)}/{tot_svc}) ●"
+    elif in_pausa:
+        svc_txt = f"Servizi BG: Pausa ({len(in_pausa)}/{tot_svc}) ◐"
+    else:
+        svc_txt = f"Servizi BG: Attivi ({len(attivi)}/{tot_svc}) ○"
+
+    hags_txt = "HAGS: ON ●" if hags is True else ("HAGS: OFF ○" if hags is False else "HAGS: N/D")
+    if dldsr_on:
+        prima_res = dldsr_res[0] if dldsr_res else "attivo"
+        dldsr_txt = f"DLDSR: ON ({prima_res}) ●"
+    else:
+        dldsr_txt = "DLDSR: OFF ○"
+
+    attivi_count = sum([
+        bool(fps_cap),
+        len(in_pausa) > 0,
+        hags is True,
+        dldsr_on,
+    ])
+    colore = "#81c784" if attivi_count >= 3 else ("#ffb74d" if attivi_count >= 1 else "#9e9e9e")
+
+    return {
+        "fps_cap": fps_cap,
+        "servizi_in_pausa": in_pausa,
+        "servizi_attivi": attivi,
+        "hags": hags,
+        "dldsr_attivo": dldsr_on,
+        "risoluzioni_dldsr": dldsr_res,
+        "testo_barra": f"Gaming: {fps_txt}  |  {svc_txt}  |  {hags_txt}  |  {dldsr_txt}",
+        "colore": colore,
+    }
+
+
 def pausa_servizi_gaming(servizi: list[str] | None = None) -> str:
     """Mette temporaneamente in pausa i servizi pesanti di Windows (richiede UAC) usando allowlist fissa."""
     candidati = servizi_gaming_attivi() if servizi is None else [s for s in servizi if s in GAMING_PAUSABLE_SERVICES]
@@ -1265,8 +1326,8 @@ def pausa_servizi_gaming(servizi: list[str] | None = None) -> str:
             stato = _carica_gaming_state()
             stato["servizi_in_pausa"] = _servizi_salvati_da_riavviare()
             _salva_gaming_state(stato)
-            return f"Servizi messi in pausa (UAC confermato): {', '.join(candidati)}. Verranno riavviati con Balance."
-        return "Pausa servizi annullata dall'utente nella finestra UAC."
+            return f"Servizi messi in pausa (UAC confermato): {', '.join(candidati)} ●. Verranno riavviati con Balance."
+        return "Pausa servizi annullata dall'utente nella finestra UAC (servizi lasciati attivi ○)."
     except Exception as e:
         return f"Errore durante la pausa dei servizi: {e}"
 
@@ -1289,8 +1350,8 @@ def riavvia_servizi_gaming() -> str:
             stato = _carica_gaming_state()
             stato.pop("servizi_in_pausa", None)
             _salva_gaming_state(stato)
-            return f"Servizi Windows riavviati (UAC confermato): {', '.join(da_riavviare)}."
-        return "Riavvio servizi annullato nella finestra UAC."
+            return f"Servizi Windows riavviati (UAC confermato): {', '.join(da_riavviare)} ○."
+        return "Riavvio servizi annullato nella finestra UAC (servizi ancora in pausa)."
     except Exception as e:
         return f"Errore durante il riavvio dei servizi: {e}"
 
@@ -1435,7 +1496,14 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
     else:
         testo = "Check-up pre-partita: tutto OK, nessun collo di bottiglia rilevato."
 
-    return {"ok": len(avvisi) == 0, "avvisi": avvisi, "testo": testo, "consiglia_dldsr": consiglia_dldsr}
+    return {
+        "ok": len(avvisi) == 0,
+        "avvisi": avvisi,
+        "testo": testo,
+        "consiglia_dldsr": consiglia_dldsr,
+        "dldsr_attivo": bool(mon.get("dldsr_attivo", False)),
+        "risoluzioni_dldsr": mon.get("risoluzioni_dldsr", []),
+    }
 
 def pulisci_file_temporanei() -> str:
     """Elimina i file temporanei non in uso dalla cartella TEMP di Windows."""

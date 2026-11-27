@@ -647,3 +647,29 @@ def test_diagnostica_dldsr_cpu_bound_e_monitor():
     # Smoke test lettura reale monitor principale
     mon = tools.info_monitor_principale()
     assert {"larghezza", "altezza", "refresh_hz", "dldsr_attivo"}.issubset(mon.keys())
+
+
+def test_stato_ottimizzazioni_gaming():
+    # Tutto attivo (verde)
+    with patch("modules.tools._nvapi_drs_frl_fps", return_value=(True, 72)), \
+         patch("modules.tools._stato_servizi_dettaglio", return_value={"WSearch": "stopped", "SysMain": "stopped", "DiagTrack": "stopped"}), \
+         patch("modules.tools._leggi_hags_attivo", return_value=True), \
+         patch("modules.tools.info_monitor_principale", return_value={"dldsr_attivo": True, "risoluzioni_dldsr": ["3413x1440"]}):
+        st_on = tools.stato_ottimizzazioni_gaming()
+    assert "FPS Cap 72 ●" in st_on["testo_barra"]
+    assert "Pausa (3/3) ●" in st_on["testo_barra"]
+    assert "HAGS: ON ●" in st_on["testo_barra"]
+    assert "DLDSR: ON (3413x1440) ●" in st_on["testo_barra"]
+    assert st_on["colore"] == "#81c784"
+
+    # Tutto spento (grigio)
+    with patch("modules.tools._nvapi_drs_frl_fps", return_value=(True, None)), \
+         patch("modules.tools._stato_servizi_dettaglio", return_value={"WSearch": "running", "SysMain": "running", "DiagTrack": "running"}), \
+         patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch("modules.tools.info_monitor_principale", return_value={"dldsr_attivo": False, "risoluzioni_dldsr": []}):
+        st_off = tools.stato_ottimizzazioni_gaming()
+    assert "FPS Cap OFF ○" in st_off["testo_barra"]
+    assert "Attivi (3/3) ○" in st_off["testo_barra"]
+    assert "HAGS: OFF ○" in st_off["testo_barra"]
+    assert "DLDSR: OFF ○" in st_off["testo_barra"]
+    assert st_off["colore"] == "#9e9e9e"

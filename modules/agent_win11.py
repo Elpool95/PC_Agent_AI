@@ -60,10 +60,19 @@ class PCAgentGUI:
         self.lbl_gpu.pack(side=tk.LEFT, padx=4)
 
         row4 = tk.Frame(tele_frame, bg="#141414")
-        row4.pack(fill=tk.X, padx=8, pady=(2, 6))
+        row4.pack(fill=tk.X, padx=8, pady=(2, 2))
 
         self.lbl_net = tk.Label(row4, text="Rete: rilevamento in corso...", bg="#141414", fg="#4db6ac", font=("Consolas", 10, "bold"))
         self.lbl_net.pack(side=tk.LEFT, padx=4)
+
+        row5 = tk.Frame(tele_frame, bg="#141414")
+        row5.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+        self.lbl_gaming_status = tk.Label(
+            row5, text="Gaming: rilevamento stato...", bg="#141414", fg="#9e9e9e",
+            font=("Consolas", 9, "bold"), anchor="w"
+        )
+        self.lbl_gaming_status.pack(side=tk.LEFT, padx=4)
 
         # --- PULSANTI RAPIDI LOCALI ---
         btn_frame = tk.Frame(root, bg="#1e1e1e")
@@ -213,6 +222,16 @@ class PCAgentGUI:
                 "Clicca il pulsante 'Lock LHM' per proteggerlo via Windows Firewall.\n"
             )
 
+        self._aggiorna_barra_gaming_async()
+
+    def _aggiorna_barra_gaming_async(self):
+        """Aggiorna la riga di stato Gaming (FPS Cap, Servizi BG, HAGS, DLDSR) in modo non bloccante."""
+        stato_g = tools.stato_ottimizzazioni_gaming()
+        self.root.after(0, self._aggiorna_stato_gaming_ui, stato_g["testo_barra"], stato_g["colore"])
+
+    def _aggiorna_stato_gaming_ui(self, testo: str, colore: str):
+        self.lbl_gaming_status.config(text=testo, fg=colore)
+
     def _aggiorna_stato_lhm_btn(self, lhm_sec: dict):
         if lhm_sec.get("sicuro"):
             self.btn_lhm_lock.config(text="LHM Locked ●", bg="#2e7d32", activebackground="#388e3c")
@@ -359,6 +378,9 @@ class PCAgentGUI:
                     gpu_text, gpu_color,
                     net_text, net_color
                 )
+                if ciclo == 1 or ciclo % 5 == 0:
+                    stato_g = tools.stato_ottimizzazioni_gaming()
+                    self.root.after(0, self._aggiorna_stato_gaming_ui, stato_g["testo_barra"], stato_g["colore"])
             except Exception:
                 pass
 
@@ -435,32 +457,69 @@ class PCAgentGUI:
         self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_perf}\n{res_temp}\n{checkup['testo']}\n")
 
         attivi = tools.servizi_gaming_attivi()
-        if attivi and self._chiedi_conferma_utente(
+        if not attivi:
+            self.root.after(
+                0, self.aggiungi_testo, "Sistema",
+                f"Servizi background ({', '.join(config.GAMING_PAUSABLE_SERVICES)}): già tutti in pausa ●.\n"
+            )
+        elif self._chiedi_conferma_utente(
             f"Vuoi mettere in pausa temporaneamente i servizi background di Windows ({', '.join(attivi)}) "
             "per ridurre picchi disco e micro-stutter?\n\nRichiederà conferma UAC e verranno riavviati su 'Balance'."
         ):
             res_svc = tools.pausa_servizi_gaming(attivi)
             self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_svc}\n")
+        else:
+            self.root.after(
+                0, self.aggiungi_testo, "Sistema",
+                f"Servizi background lasciati attivi su scelta utente ({', '.join(attivi)}) ○.\n"
+            )
 
-        if tools._leggi_hags_attivo() is False and self._chiedi_conferma_utente(
-            "HAGS (Pianificazione GPU con accelerazione hardware) è attualmente spento.\n\n"
-            "Vuoi abilitarlo automaticamente ora (richiederà conferma UAC e un riavvio del PC)?"
-        ):
-            res_hags = tools.abilita_hags()
-            self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_hags}\n")
-
-        dldsr_tip = checkup.get("consiglia_dldsr")
-        if dldsr_tip and self._chiedi_conferma_utente(
-            f"Sistema CPU-bound rilevato su {dldsr_tip['nativa']}: attivare DLDSR 1.78x ({dldsr_tip['res_178']}) "
-            f"o 2.25x ({dldsr_tip['res_225']}) e alzare la qualità grafica sposta carico sulla GPU RTX e riduce lo stutter.\n\n"
-            "Vuoi aprire ora il Pannello di Controllo NVIDIA (Gestisci impostazioni 3D > Fattori DSR) per abilitarlo?"
-        ):
-            if tools.apri_pannello_nvidia():
+        hags_stato = tools._leggi_hags_attivo()
+        if hags_stato is False:
+            if self._chiedi_conferma_utente(
+                "HAGS (Pianificazione GPU con accelerazione hardware) è attualmente spento.\n\n"
+                "Vuoi abilitarlo automaticamente ora (richiederà conferma UAC e un riavvio del PC)?"
+            ):
+                res_hags = tools.abilita_hags()
+                self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_hags}\n")
+            else:
                 self.root.after(
                     0, self.aggiungi_testo, "Sistema",
-                    "Pannello di Controllo NVIDIA aperto: vai su 'Gestisci impostazioni 3D' > 'Fattori DSR' "
-                    f"e spunta 1.78x DL ({dldsr_tip['res_178']}) e/o 2.25x DL ({dldsr_tip['res_225']}), poi seleziona la risoluzione nei giochi.\n"
+                    "HAGS lasciato disattivo su scelta utente ○.\n"
                 )
+
+        dldsr_tip = checkup.get("consiglia_dldsr")
+        if dldsr_tip:
+            if self._chiedi_conferma_utente(
+                f"Sistema CPU-bound rilevato su {dldsr_tip['nativa']}: attivare DLDSR 1.78x ({dldsr_tip['res_178']}) "
+                f"o 2.25x ({dldsr_tip['res_225']}) e alzare la qualità grafica sposta carico sulla GPU RTX e riduce lo stutter.\n\n"
+                "Vuoi aprire ora il Pannello di Controllo NVIDIA (Gestisci impostazioni 3D > Fattori DSR) per abilitarlo?"
+            ):
+                if tools.apri_pannello_nvidia():
+                    self.root.after(
+                        0, self.aggiungi_testo, "Sistema",
+                        "Pannello di Controllo NVIDIA aperto: vai su 'Gestisci impostazioni 3D' > 'Fattori DSR' "
+                        f"e spunta 1.78x DL ({dldsr_tip['res_178']}) e/o 2.25x DL ({dldsr_tip['res_225']}), poi seleziona la risoluzione nei giochi. "
+                        "Appena applichi, la barra Gaming mostrerà 'DLDSR: ON ●'.\n"
+                    )
+                else:
+                    self.root.after(
+                        0, self.aggiungi_testo, "Sistema",
+                        "Impossibile aprire automaticamente il Pannello di Controllo NVIDIA: aprilo dal menu Start > 'Gestisci impostazioni 3D' > 'Fattori DSR'.\n"
+                    )
+            else:
+                self.root.after(
+                    0, self.aggiungi_testo, "Sistema",
+                    f"DLDSR lasciato disattivo su scelta utente (risoluzione nativa {dldsr_tip['nativa']} mantenuta) ○.\n"
+                )
+        elif checkup.get("dldsr_attivo"):
+            res_list = ", ".join(checkup.get("risoluzioni_dldsr", []))
+            self.root.after(
+                0, self.aggiungi_testo, "Sistema",
+                f"DLDSR: ATTIVO ● (risoluzioni disponibili: {res_list}).\n"
+            )
+
+        self._aggiorna_barra_gaming_async()
 
     def azione_bilanciato_locale(self):
         res = tools.ripristina_modalita_bilanciata()
@@ -468,6 +527,7 @@ class PCAgentGUI:
         self.root.after(0, self._imposta_stato_modalita, "bilanciato")
         testo = f"{res}\n{res_svc}\n" if res_svc else f"{res}\n"
         self.root.after(0, self.aggiungi_testo, "Sistema", testo)
+        self._aggiorna_barra_gaming_async()
 
     def azione_avvio_locale(self):
         apps = tools.elenca_app_avvio()

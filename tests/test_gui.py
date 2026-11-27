@@ -192,9 +192,10 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         root.update()
         assert "SPAZIO CRITICO" in app.chat_area.get("1.0", tk.END)
 
-    with patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \
+    with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap 72 ●", "colore": "#81c784"}), \
+         patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \
          patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"), \
-         patch("modules.tools.diagnostica_pre_partita", return_value={"ok": True, "avvisi": [], "testo": "Check-up OK"}), \
+         patch("modules.tools.diagnostica_pre_partita", return_value={"ok": True, "avvisi": [], "testo": "Check-up OK", "consiglia_dldsr": None, "dldsr_attivo": True, "risoluzioni_dldsr": ["3413x1440"]}), \
          patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
          patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch.object(app, "_chiedi_conferma_utente", return_value=True), \
@@ -207,8 +208,30 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         assert "Check-up OK" in txt
         assert "Servizi in pausa OK" in txt
         assert "HAGS abilitato OK" in txt
+        assert "DLDSR: ATTIVO ●" in txt
+        assert "FPS Cap 72 ●" in app.lbl_gaming_status.cget("text")
 
-    with patch("modules.tools.ripristina_modalita_bilanciata", return_value="Bil OK"), \
+    # Feedback esplicito su scelta 'No' per Servizi, HAGS e DLDSR
+    with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap 72 ● | DLDSR: OFF ○", "colore": "#ffb74d"}), \
+         patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \
+         patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"), \
+         patch("modules.tools.diagnostica_pre_partita", return_value={
+             "ok": False, "avvisi": ["DLDSR"], "testo": "Check-up WARN",
+             "consiglia_dldsr": {"nativa": "2560x1080", "res_178": "3413x1440", "res_225": "3840x1620"},
+             "dldsr_attivo": False, "risoluzioni_dldsr": []
+         }), \
+         patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
+         patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch.object(app, "_chiedi_conferma_utente", return_value=False):
+        app.azione_gaming_locale()
+        root.update()
+        txt_no = app.chat_area.get("1.0", tk.END)
+        assert "Servizi background lasciati attivi" in txt_no
+        assert "HAGS lasciato disattivo" in txt_no
+        assert "DLDSR lasciato disattivo" in txt_no
+
+    with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap OFF ○", "colore": "#9e9e9e"}), \
+         patch("modules.tools.ripristina_modalita_bilanciata", return_value="Bil OK"), \
          patch("modules.tools.ha_servizi_gaming_in_pausa", return_value=True), \
          patch("modules.tools.riavvia_servizi_gaming", return_value="Servizi riavviati OK"):
         app.azione_bilanciato_locale()
@@ -216,6 +239,7 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         txt = app.chat_area.get("1.0", tk.END)
         assert "Bil OK" in txt
         assert "Servizi riavviati OK" in txt
+        assert "FPS Cap OFF ○" in app.lbl_gaming_status.cget("text")
 
     with patch("modules.tools.elenca_app_avvio", return_value={"utente_corrente": {"App1": "x"}, "sistema": {}}):
         app.azione_avvio_locale()
