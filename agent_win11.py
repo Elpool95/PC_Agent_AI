@@ -23,7 +23,7 @@ class PCAgentGUI:
         row1 = tk.Frame(tele_frame, bg="#141414")
         row1.pack(fill=tk.X, padx=8, pady=(6, 2))
 
-        self.lbl_cpu = tk.Label(row1, text="CPU: --% | -- °C", bg="#141414", fg="#81c784", font=("Consolas", 10, "bold"))
+        self.lbl_cpu = tk.Label(row1, text="CPU: --% | -- °C | -- W", bg="#141414", fg="#81c784", font=("Consolas", 10, "bold"))
         self.lbl_cpu.pack(side=tk.LEFT, padx=(4, 18))
 
         self.lbl_ram = tk.Label(row1, text="RAM: --/-- GB (--%)", bg="#141414", fg="#4fc3f7", font=("Consolas", 10, "bold"))
@@ -32,8 +32,11 @@ class PCAgentGUI:
         row2 = tk.Frame(tele_frame, bg="#141414")
         row2.pack(fill=tk.X, padx=8, pady=2)
 
-        self.lbl_disk = tk.Label(row2, text="Dischi C: / E: rilevamento in corso...", bg="#141414", fg="#ce93d8", font=("Consolas", 10, "bold"))
-        self.lbl_disk.pack(side=tk.LEFT, padx=4)
+        self.lbl_disk = tk.Label(
+            row2, text="Dischi: rilevamento in corso...", bg="#141414", fg="#ce93d8",
+            font=("Consolas", 10, "bold"), justify=tk.LEFT, anchor="w"
+        )
+        self.lbl_disk.pack(side=tk.LEFT, fill=tk.X, padx=4)
 
         row3 = tk.Frame(tele_frame, bg="#141414")
         row3.pack(fill=tk.X, padx=8, pady=(2, 6))
@@ -94,7 +97,7 @@ class PCAgentGUI:
 
         # --- BARRA DI INPUT ---
         input_frame = tk.Frame(root, bg="#1e1e1e")
-        input_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+        input_frame.pack(fill=tk.X, padx=10, pady=(5, 4))
 
         self.entry = tk.Entry(
             input_frame, bg="#2d2d30", fg="#ffffff", insertbackground="#ffffff",
@@ -110,10 +113,26 @@ class PCAgentGUI:
         )
         self.send_btn.pack(side=tk.RIGHT)
 
-        self.aggiungi_testo("Agent", "Pronto. Telemetria live attiva: CPU (+ Temp), RAM, Dischi C:/E: e RTX 3070.\n")
+        # --- BARRA INFERIORE VERSIONI SISTEMA ---
+        footer_frame = tk.Frame(root, bg="#141414", bd=1, relief=tk.SOLID)
+        footer_frame.pack(fill=tk.X, padx=10, pady=(2, 8))
+
+        self.lbl_footer = tk.Label(
+            footer_frame, text="Rilevamento versione Windows 11 e driver grafico...",
+            bg="#141414", fg="#9e9e9e", font=("Consolas", 9), anchor="w"
+        )
+        self.lbl_footer.pack(fill=tk.X, padx=8, pady=4)
+
+        self.aggiungi_testo("Agent", "Pronto. Telemetria live attiva: CPU (Temp + W), RAM, tutti i dischi e RTX 3070.\n")
 
         psutil.cpu_percent(interval=None)
+        threading.Thread(target=self._carica_info_footer, daemon=True).start()
         threading.Thread(target=self._loop_telemetria, daemon=True).start()
+
+    def _carica_info_footer(self):
+        info = tools.info_versioni_sistema()
+        testo = f"OS: {info['windows']}   |   Driver Grafico NVIDIA: {info['driver_gpu']}"
+        self.root.after(0, lambda: self.lbl_footer.config(text=testo))
 
     def _imposta_stato_modalita(self, modalita):
         if modalita == "gaming":
@@ -124,7 +143,8 @@ class PCAgentGUI:
             self.btn_bilanciato.config(text="Bilanciato ● ATTIVO", bg="#0277bd", activebackground="#0288d1")
 
     def _loop_telemetria(self):
-        mappa_dischi = tools.mappa_dischi_fisici(("C", "E"))
+        lettere_correnti = tools.elenca_lettere_dischi()
+        mappa_dischi = tools.mappa_dischi_fisici()
         prev_io = psutil.disk_io_counters(perdisk=True)
         prev_time = time.time()
 
@@ -135,8 +155,13 @@ class PCAgentGUI:
                 dt = max(now - prev_time, 0.1)
                 curr_io = psutil.disk_io_counters(perdisk=True)
 
+                nuove_lettere = tools.elenca_lettere_dischi()
+                if nuove_lettere != lettere_correnti:
+                    lettere_correnti = nuove_lettere
+                    mappa_dischi = tools.mappa_dischi_fisici()
+
                 parti_dischi = []
-                for lettera in ("C", "E"):
+                for lettera in lettere_correnti:
                     try:
                         uso = psutil.disk_usage(f"{lettera}:\\")
                         liberi = round(uso.free / (1024**3), 0)
@@ -152,11 +177,18 @@ class PCAgentGUI:
                     parti_dischi.append(info)
 
                 prev_io, prev_time = curr_io, now
-                disk_text = "  |  ".join(parti_dischi)
+                if parti_dischi:
+                    righe_dischi = [
+                        "  |  ".join(parti_dischi[i:i + 2])
+                        for i in range(0, len(parti_dischi), 2)
+                    ]
+                    disk_text = "\n".join(righe_dischi)
+                else:
+                    disk_text = "Nessun disco rilevato"
                 disk_color = "#ce93d8"
 
                 cpu = psutil.cpu_percent(interval=None)
-                cpu_temp = tools.leggi_temp_cpu()
+                cpu_temp, cpu_watt = tools.leggi_sensori_cpu()
                 ram = psutil.virtual_memory()
                 ram_used = round(ram.used / (1024**3), 1)
                 ram_tot = round(ram.total / (1024**3), 1)
@@ -179,7 +211,7 @@ class PCAgentGUI:
 
                 self.root.after(
                     0, self._aggiorna_barra,
-                    f"CPU: {cpu}% | {cpu_temp}", cpu_color,
+                    f"CPU: {cpu}% | {cpu_temp} | {cpu_watt}", cpu_color,
                     f"RAM: {ram_used}/{ram_tot} GB ({ram.percent}%)", ram_color,
                     disk_text, disk_color,
                     gpu_text, gpu_color

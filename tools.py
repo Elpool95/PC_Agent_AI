@@ -94,18 +94,53 @@ def _cerca_temp_cpu(nodo) -> str | None:
                 return trovato
     return None
 
-def leggi_temp_cpu() -> str:
-    """Legge la temperatura della CPU da LibreHardwareMonitor (http://localhost:8085/data.json) se attivo."""
+def _cerca_potenza_cpu(nodo, target="CPU Package") -> str | None:
+    """Cerca il sensore potenza CPU (W) nel JSON di LibreHardwareMonitor."""
+    if isinstance(nodo, dict):
+        testo = nodo.get("Text", "")
+        valore = nodo.get("Value", "")
+        if target in testo and "W" in valore:
+            return valore
+        for figlio in nodo.get("Children", []):
+            trovato = _cerca_potenza_cpu(figlio, target)
+            if trovato:
+                return trovato
+    elif isinstance(nodo, list):
+        for elem in nodo:
+            trovato = _cerca_potenza_cpu(elem, target)
+            if trovato:
+                return trovato
+    return None
+
+def leggi_sensori_cpu() -> tuple[str, str]:
+    """Legge temperatura (°C) e potenza (W) della CPU da LibreHardwareMonitor (http://localhost:8085/data.json)."""
     try:
         with urllib.request.urlopen("http://localhost:8085/data.json", timeout=0.4) as resp:
             dati = json.loads(resp.read().decode("utf-8"))
-            temp = _cerca_temp_cpu(dati)
-            return temp if temp else "N/D"
+            temp = _cerca_temp_cpu(dati) or "N/D"
+            watt = _cerca_potenza_cpu(dati, "CPU Package") or _cerca_potenza_cpu(dati, "CPU Cores") or "N/D"
+            return temp, watt
     except Exception:
-        return "-- °C (avvia LHM)"
+        return "-- °C (avvia LHM)", "-- W"
 
-def mappa_dischi_fisici(lettere=("C", "E")) -> dict:
-    """Associa le lettere di unità (es. C, E) al rispettivo PhysicalDriveX di Windows."""
+def leggi_temp_cpu() -> str:
+    """Legge la temperatura della CPU da LibreHardwareMonitor (http://localhost:8085/data.json) se attivo."""
+    return leggi_sensori_cpu()[0]
+
+def elenca_lettere_dischi() -> list[str]:
+    """Restituisce tutte le lettere di unità disco attualmente montate e accessibili."""
+    lettere = []
+    for part in psutil.disk_partitions(all=False):
+        if "cdrom" in part.opts or part.fstype == "":
+            continue
+        if part.device and len(part.device) >= 1 and part.device[0].isalpha():
+            lettera = part.device[0].upper()
+            if lettera not in lettere:
+                lettere.append(lettera)
+    return sorted(lettere)
+
+def mappa_dischi_fisici(lettere=None) -> dict:
+    """Associa le lettere di unità (es. C, D, E, ...) al rispettivo PhysicalDriveX di Windows."""
     mappa = {}
     try:
         ps_cmd = 'Get-Partition | Where-Object {$_.DriveLetter} | ForEach-Object {"$($_.DriveLetter):PhysicalDrive$($_.DiskNumber)"}'
@@ -117,11 +152,51 @@ def mappa_dischi_fisici(lettere=("C", "E")) -> dict:
             if ":" in riga:
                 lettera, drive = riga.split(":", 1)
                 lettera = lettera.strip().upper()
-                if lettera in lettere:
+                if lettere is None or lettera in lettere:
                     mappa[lettera] = drive.strip()
     except Exception:
         pass
     return mappa
+
+def info_versioni_sistema() -> dict:
+    """Legge versione di Windows 11 installata (da registro) e versione del driver grafico NVIDIA."""
+    win_str = "Windows 11 (N/D)"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as key:
+            product = winreg.QueryValueEx(key, "ProductName")[0]
+            try:
+                display_ver = winreg.QueryValueEx(key, "DisplayVersion")[0]
+            except OSError:
+                display_ver = ""
+            build = winreg.QueryValueEx(key, "CurrentBuild")[0]
+            try:
+                ubr = winreg.QueryValueEx(key, "UBR")[0]
+            except OSError:
+                ubr = None
+            try:
+                if int(build) >= 22000 and "Windows 10" in product:
+                    product = product.replace("Windows 10", "Windows 11")
+            except ValueError:
+                pass
+            build_full = f"{build}.{ubr}" if ubr is not None else str(build)
+            ver_part = f" {display_ver}" if display_ver else ""
+            win_str = f"{product}{ver_part} (Build {build_full})"
+    except Exception:
+        pass
+
+    driver_str = "N/D"
+    try:
+        smi = _trova_nvidia_smi()
+        out = subprocess.check_output(
+            [smi, "--query-gpu=driver_version", "--format=csv,noheader"],
+            encoding="utf-8", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+        ).strip()
+        if out:
+            driver_str = out.splitlines()[0].strip()
+    except Exception:
+        pass
+
+    return {"windows": win_str, "driver_gpu": driver_str}
 
 def monitora_archiviazione() -> list:
     """Legge spazio usato, libero e percentuale di tutte le partizioni fisse."""
