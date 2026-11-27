@@ -449,6 +449,19 @@ class PCAgentGUI:
             res_hags = tools.abilita_hags()
             self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_hags}\n")
 
+        dldsr_tip = checkup.get("consiglia_dldsr")
+        if dldsr_tip and self._chiedi_conferma_utente(
+            f"Sistema CPU-bound rilevato su {dldsr_tip['nativa']}: attivare DLDSR 1.78x ({dldsr_tip['res_178']}) "
+            f"o 2.25x ({dldsr_tip['res_225']}) e alzare la qualità grafica sposta carico sulla GPU RTX e riduce lo stutter.\n\n"
+            "Vuoi aprire ora il Pannello di Controllo NVIDIA (Gestisci impostazioni 3D > Fattori DSR) per abilitarlo?"
+        ):
+            if tools.apri_pannello_nvidia():
+                self.root.after(
+                    0, self.aggiungi_testo, "Sistema",
+                    "Pannello di Controllo NVIDIA aperto: vai su 'Gestisci impostazioni 3D' > 'Fattori DSR' "
+                    f"e spunta 1.78x DL ({dldsr_tip['res_178']}) e/o 2.25x DL ({dldsr_tip['res_225']}), poi seleziona la risoluzione nei giochi.\n"
+                )
+
     def azione_bilanciato_locale(self):
         res = tools.ripristina_modalita_bilanciata()
         res_svc = tools.riavvia_servizi_gaming() if tools.ha_servizi_gaming_in_pausa() else ""

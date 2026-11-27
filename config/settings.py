@@ -47,6 +47,10 @@ DISK_CRIT = 90
 TELEMETRY_INTERVAL_NORMAL = 1
 TELEMETRY_INTERVAL_GAMING = 2.5
 
+# Limite FPS NVIDIA automatico in Gaming Mode (refresh_hz - margine, minimo 30 FPS)
+FPS_CAP_MARGIN_HZ = 3
+FPS_CAP_MIN = 30
+
 # Processi sicuri da chiudere in Modalità Gaming
 SAFE_TO_CLOSE = [
     "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe",

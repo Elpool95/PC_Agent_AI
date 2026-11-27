@@ -182,6 +182,7 @@ def test_piano_energetico_e_modalita(tmp_path):
          patch("modules.tools._trova_o_crea_prestazioni_eccellenti", return_value="11111111-1111-1111-1111-111111111111"), \
          patch("subprocess.run", return_value=SimpleNamespace(returncode=0)) as mock_run, \
          patch("modules.tools.applica_ottimizzazioni_registro_gaming", return_value=["Windows Game Mode ON", "Notifiche Toast OFF"]), \
+         patch("modules.tools.applica_fps_cap_gaming", return_value={"applicato": True, "target_fps": 72, "refresh_hz": 75, "messaggio": "Limite FPS NVIDIA (Max Frame Rate): 72 FPS (monitor principale 2560x1080 @ 75 Hz, margine -3 Hz)."}), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True) as mock_prio, \
          patch("psutil.virtual_memory", return_value=fake_vm), \
          patch("psutil.wait_procs", return_value=([], [])), \
@@ -190,6 +191,7 @@ def test_piano_energetico_e_modalita(tmp_path):
     assert "Prestazioni eccellenti" in msg
     assert "USB Suspend OFF" in msg
     assert "Windows Game Mode ON" in msg
+    assert "72 FPS" in msg
     assert "chrome.exe" in msg
     assert "512.0 MB" in msg
     assert "BELOW_NORMAL" in msg
@@ -201,10 +203,12 @@ def test_piano_energetico_e_modalita(tmp_path):
     with patch("modules.tools.GAMING_STATE_FILE", state_file), \
          patch("subprocess.run") as mock_run2, \
          patch("modules.tools.ripristina_ottimizzazioni_registro_gaming", return_value=4), \
+         patch("modules.tools.ripristina_fps_cap_gaming", return_value=" Limite FPS NVIDIA rimosso (Disattivato)."), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True) as mock_prio2:
         res_bil = tools.ripristina_modalita_bilanciata()
         assert "Bilanciato" in res_bil
         assert "4 impostazioni" in res_bil
+        assert "Limite FPS NVIDIA rimosso" in res_bil
         mock_run2.assert_called_once()
         mock_prio2.assert_called_once_with(False)
 
@@ -449,6 +453,7 @@ def test_snapshot_persistente_piano_personalizzato(tmp_path):
          patch("modules.tools._trova_o_crea_prestazioni_eccellenti", return_value="11111111-1111-1111-1111-111111111111"), \
          patch("subprocess.run", return_value=SimpleNamespace(returncode=0)), \
          patch("modules.tools.applica_ottimizzazioni_registro_gaming", return_value=[]), \
+         patch("modules.tools.applica_fps_cap_gaming", return_value={"applicato": False, "target_fps": 0, "refresh_hz": 0, "messaggio": ""}), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True), \
          patch("psutil.virtual_memory", return_value=SimpleNamespace(used=4 * 1024**3)), \
          patch("psutil.process_iter", return_value=[]):
@@ -459,6 +464,7 @@ def test_snapshot_persistente_piano_personalizzato(tmp_path):
     with patch("modules.tools.GAMING_STATE_FILE", state_file), \
          patch("subprocess.run") as mock_restore_run, \
          patch("modules.tools.ripristina_ottimizzazioni_registro_gaming", return_value=0), \
+         patch("modules.tools.ripristina_fps_cap_gaming", return_value=""), \
          patch("modules.tools.imposta_priorita_processo_corrente", return_value=True):
         res = tools.ripristina_modalita_bilanciata()
     assert "AMD Ryzen Balanced" in res
@@ -468,6 +474,7 @@ def test_snapshot_persistente_piano_personalizzato(tmp_path):
 
 
 def test_diagnostica_pre_partita_ok_e_avvisi():
+    mon_dldsr_ok = {"larghezza": 2560, "altezza": 1080, "refresh_hz": 75, "risoluzioni_dldsr": ["3413x1440"], "dldsr_attivo": True}
     # Caso tutto OK
     ram_ok = {"banchi": [{"gb": 8}, {"gb": 8}], "modalita_canale": "Dual Channel", "tipo": "DDR4", "frequenza_mhz": 3200}
     with patch("modules.tools._leggi_hags_attivo", return_value=True), \
@@ -476,10 +483,12 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
          patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=50.0, free=200 * 1024**3)), \
-         patch("modules.tools.monitora_gpu", return_value={"temperatura_num": 40, "temperatura_c": "40°C"}), \
-         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "42,0 °C"}):
+         patch("modules.tools.monitora_gpu", return_value={"temperatura_num": 40, "temperatura_c": "40°C", "gpu": "NVIDIA GeForce RTX 3070", "vram_totale_mb": "8192"}), \
+         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "42,0 °C"}), \
+         patch("modules.tools.info_monitor_principale", return_value=mon_dldsr_ok):
         res_ok = tools.diagnostica_pre_partita(ram_ok)
     assert res_ok["ok"] is True
+    assert res_ok["consiglia_dldsr"] is None
     assert "tutto OK" in res_ok["testo"]
 
     # Caso con colli di bottiglia reali (HAGS off, VRR off, PhysX Auto, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
@@ -490,8 +499,9 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Wi-Fi", "ip": "192.168.1.5", "link_mbps": 300}), \
          patch("modules.tools.misura_ping", return_value={"ms": 85, "stato": "85 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=95.0, free=10 * 1024**3)), \
-         patch("modules.tools.monitora_gpu", return_value={"temperatura_num": 78, "temperatura_c": "78°C"}), \
-         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "80,5 °C"}):
+         patch("modules.tools.monitora_gpu", return_value={"temperatura_num": 78, "temperatura_c": "78°C", "gpu": "NVIDIA GeForce RTX 3070", "vram_totale_mb": "8192"}), \
+         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "80,5 °C"}), \
+         patch("modules.tools.info_monitor_principale", return_value=mon_dldsr_ok):
         res_warn = tools.diagnostica_pre_partita(ram_slow)
     assert res_warn["ok"] is False
     assert len(res_warn["avvisi"]) == 10
@@ -570,3 +580,70 @@ def test_abilita_hags():
     with patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch("ctypes.windll.shell32.ShellExecuteW", return_value=5):
         assert "annullata" in tools.abilita_hags().lower()
+
+
+def test_fps_cap_gaming_e_ripristino_persistente(tmp_path):
+    state_file = str(tmp_path / "gaming_state.json")
+    mon_75 = {"larghezza": 2560, "altezza": 1080, "refresh_hz": 75, "risoluzioni_dldsr": [], "dldsr_attivo": False}
+
+    # Caso 1: nessun cap precedente -> imposta 72 FPS e su Balance rimuove ('delete')
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools._nvapi_drs_frl_fps", side_effect=[(True, None), (True, 72)]) as mock_nv:
+        res = tools.applica_fps_cap_gaming(mon_75)
+    assert res["applicato"] is True
+    assert res["target_fps"] == 72
+    assert "72 FPS" in res["messaggio"]
+    assert "2560x1080 @ 75 Hz" in res["messaggio"]
+    assert mock_nv.call_args_list[1].args == ("set", 72)
+    assert os.path.isfile(state_file)
+
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools._nvapi_drs_frl_fps", return_value=(True, None)) as mock_nv_del:
+        msg_rest = tools.ripristina_fps_cap_gaming()
+    assert "rimosso" in msg_rest.lower()
+    mock_nv_del.assert_called_once_with("delete")
+    assert not os.path.exists(state_file)
+
+    # Caso 2: esisteva un cap precedente (es. 120 FPS) su monitor 144 Hz -> imposta 141 FPS e poi ripristina 120 FPS
+    mon_144 = {"larghezza": 2560, "altezza": 1440, "refresh_hz": 144, "risoluzioni_dldsr": [], "dldsr_attivo": False}
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools._nvapi_drs_frl_fps", side_effect=[(True, 120), (True, 141)]):
+        res2 = tools.applica_fps_cap_gaming(mon_144)
+    assert res2["applicato"] is True and res2["target_fps"] == 141
+
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools._nvapi_drs_frl_fps", return_value=(True, 120)) as mock_nv_rest:
+        msg_rest2 = tools.ripristina_fps_cap_gaming()
+    assert "120 FPS" in msg_rest2
+    mock_nv_rest.assert_called_once_with("set", 120)
+
+    # Caso 3: monitor non valido o GPU non NVIDIA -> degrada senza errori
+    with patch("modules.tools.GAMING_STATE_FILE", state_file):
+        assert tools.applica_fps_cap_gaming({"refresh_hz": 0})["applicato"] is False
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools._nvapi_drs_frl_fps", return_value=(False, None)):
+        assert tools.applica_fps_cap_gaming(mon_75)["applicato"] is False
+
+
+def test_diagnostica_dldsr_cpu_bound_e_monitor():
+    mon_no_dldsr = {"larghezza": 2560, "altezza": 1080, "refresh_hz": 75, "risoluzioni_dldsr": [], "dldsr_attivo": False}
+    ram_ok = {"banchi": [{"gb": 8}, {"gb": 8}], "modalita_canale": "Dual Channel", "tipo": "DDR4", "frequenza_mhz": 3200}
+    with patch("modules.tools._leggi_hags_attivo", return_value=True), \
+         patch("modules.tools._leggi_vrr_attivo", return_value=True), \
+         patch("modules.tools._leggi_physx_auto", return_value=False), \
+         patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
+         patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
+         patch("psutil.disk_usage", return_value=SimpleNamespace(percent=50.0, free=200 * 1024**3)), \
+         patch("psutil.cpu_count", return_value=4), \
+         patch("modules.tools.monitora_gpu", return_value={"temperatura_num": 40, "temperatura_c": "40°C", "gpu": "NVIDIA GeForce RTX 3070", "vram_totale_mb": "8192"}), \
+         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "42,0 °C"}), \
+         patch("modules.tools.info_monitor_principale", return_value=mon_no_dldsr):
+        res = tools.diagnostica_pre_partita(ram_ok)
+    assert res["ok"] is False
+    assert res["consiglia_dldsr"] == {"nativa": "2560x1080", "res_178": "3413x1440", "res_225": "3840x1620"}
+    assert "DLDSR" in res["testo"]
+    assert "3413x1440" in res["testo"]
+
+    # Smoke test lettura reale monitor principale
+    mon = tools.info_monitor_principale()
+    assert {"larghezza", "altezza", "refresh_hz", "dldsr_attivo"}.issubset(mon.keys())

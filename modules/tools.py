@@ -14,6 +14,7 @@ from config.settings import (
     DISK_CRIT, GPU_TEMP_WARN, GAMING_PAUSABLE_SERVICES,
     GAMING_THROTTLE_PROCESSES,
     GAMING_STATE_FILE, TELEMETRY_INTERVAL_NORMAL, TELEMETRY_INTERVAL_GAMING,
+    FPS_CAP_MARGIN_HZ, FPS_CAP_MIN,
 )
 
 def _trova_nvidia_smi() -> str:
@@ -804,6 +805,261 @@ _ANTICHEAT_MAI_TOCCARE = {
     "riotclientservices.exe", "riotclientux.exe", "riotclientuxrender.exe",
 }
 
+_NVAPI_FRL_FPS_ID = 0x10835002
+_NVAPI_IDS = {
+    "Init": 0x0150E828,
+    "CreateSession": 0x0694D52E,
+    "DestroySession": 0xDAD9CFF8,
+    "LoadSettings": 0x375DBD6B,
+    "SaveSettings": 0xFCBC7E14,
+    "GetBaseProfile": 0xDA8466A0,
+    "GetSetting": 0x73BF8338,
+    "SetSetting": 0x577DD202,
+    "DeleteProfileSetting": 0xE4A26362,
+}
+
+
+class _DEVMODEW(ctypes.Structure):
+    _fields_ = [
+        ("dmDeviceName", ctypes.c_wchar * 32),
+        ("dmSpecVersion", ctypes.c_uint16),
+        ("dmDriverVersion", ctypes.c_uint16),
+        ("dmSize", ctypes.c_uint16),
+        ("dmDriverExtra", ctypes.c_uint16),
+        ("dmFields", ctypes.c_uint32),
+        ("dmPositionX", ctypes.c_int32),
+        ("dmPositionY", ctypes.c_int32),
+        ("dmDisplayOrientation", ctypes.c_uint32),
+        ("dmDisplayFixedOutput", ctypes.c_uint32),
+        ("dmColor", ctypes.c_int16),
+        ("dmDuplex", ctypes.c_int16),
+        ("dmYResolution", ctypes.c_int16),
+        ("dmTTOption", ctypes.c_int16),
+        ("dmCollate", ctypes.c_int16),
+        ("dmFormName", ctypes.c_wchar * 32),
+        ("dmLogPixels", ctypes.c_uint16),
+        ("dmBitsPerPel", ctypes.c_uint32),
+        ("dmPelsWidth", ctypes.c_uint32),
+        ("dmPelsHeight", ctypes.c_uint32),
+        ("dmDisplayFlags", ctypes.c_uint32),
+        ("dmDisplayFrequency", ctypes.c_uint32),
+        ("dmICMMethod", ctypes.c_uint32),
+        ("dmICMIntent", ctypes.c_uint32),
+        ("dmMediaType", ctypes.c_uint32),
+        ("dmDitherType", ctypes.c_uint32),
+        ("dmReserved1", ctypes.c_uint32),
+        ("dmReserved2", ctypes.c_uint32),
+        ("dmPanningWidth", ctypes.c_uint32),
+        ("dmPanningHeight", ctypes.c_uint32),
+    ]
+
+
+class _NVDRS_BINARY_SETTING(ctypes.Structure):
+    _fields_ = [("valueLength", ctypes.c_uint32), ("valueData", ctypes.c_ubyte * 4096)]
+
+
+class _NVDRS_SETTING_UNION(ctypes.Union):
+    _fields_ = [
+        ("u32Value", ctypes.c_uint32),
+        ("binaryValue", _NVDRS_BINARY_SETTING),
+        ("wszValue", ctypes.c_uint16 * 2048),
+    ]
+
+
+class _NVDRS_SETTING(ctypes.Structure):
+    _fields_ = [
+        ("version", ctypes.c_uint32),
+        ("settingName", ctypes.c_uint16 * 2048),
+        ("settingId", ctypes.c_uint32),
+        ("settingType", ctypes.c_uint32),
+        ("settingLocation", ctypes.c_uint32),
+        ("isCurrentPredefined", ctypes.c_uint32),
+        ("isPredefinedValid", ctypes.c_uint32),
+        ("predefined", _NVDRS_SETTING_UNION),
+        ("current", _NVDRS_SETTING_UNION),
+    ]
+
+
+def info_monitor_principale() -> dict:
+    """Rileva risoluzione, refresh rate (Hz) e presenza di risoluzioni DSR/DLDSR sul monitor principale."""
+    try:
+        user32 = ctypes.windll.user32
+        dm_curr = _DEVMODEW()
+        dm_curr.dmSize = ctypes.sizeof(_DEVMODEW)
+        # ENUM_CURRENT_SETTINGS = -1
+        if not user32.EnumDisplaySettingsW(None, -1, ctypes.byref(dm_curr)):
+            return {"larghezza": 0, "altezza": 0, "refresh_hz": 0, "risoluzioni_dldsr": [], "dldsr_attivo": False}
+
+        w = int(dm_curr.dmPelsWidth)
+        h = int(dm_curr.dmPelsHeight)
+        hz = int(dm_curr.dmDisplayFrequency)
+        curr_pixels = w * h
+
+        superiori = set()
+        idx = 0
+        while idx < 512:
+            dm = _DEVMODEW()
+            dm.dmSize = ctypes.sizeof(_DEVMODEW)
+            if not user32.EnumDisplaySettingsW(None, idx, ctypes.byref(dm)):
+                break
+            mw, mh = int(dm.dmPelsWidth), int(dm.dmPelsHeight)
+            if mw * mh > curr_pixels:
+                superiori.add((mw, mh))
+            idx += 1
+
+        risoluzioni_sup = [f"{mw}x{mh}" for mw, mh in sorted(superiori)]
+        return {
+            "larghezza": w,
+            "altezza": h,
+            "refresh_hz": hz,
+            "risoluzioni_dldsr": risoluzioni_sup,
+            "dldsr_attivo": bool(risoluzioni_sup),
+        }
+    except Exception:
+        return {"larghezza": 0, "altezza": 0, "refresh_hz": 0, "risoluzioni_dldsr": [], "dldsr_attivo": False}
+
+
+def _nvapi_drs_frl_fps(azione: str, valore: int | None = None) -> tuple[bool, int | None]:
+    """Legge ('get'), imposta ('set') o rimuove ('delete') il Max Frame Rate globale NVIDIA (FRL_FPS) via nvapi64.dll senza UAC."""
+    try:
+        nvapi = ctypes.WinDLL("nvapi64.dll")
+        qi = nvapi.nvapi_QueryInterface
+        qi.argtypes = [ctypes.c_uint32]
+        qi.restype = ctypes.c_void_p
+
+        ptrs = {k: qi(v) for k, v in _NVAPI_IDS.items()}
+        if not all(ptrs.values()):
+            return False, None
+
+        c_init = ctypes.CFUNCTYPE(ctypes.c_int)(ptrs["Init"])
+        c_create = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))(ptrs["CreateSession"])
+        c_destroy = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(ptrs["DestroySession"])
+        c_load = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(ptrs["LoadSettings"])
+        c_save = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(ptrs["SaveSettings"])
+        c_base = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p))(ptrs["GetBaseProfile"])
+        c_get = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(_NVDRS_SETTING))(ptrs["GetSetting"])
+        c_set = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(_NVDRS_SETTING))(ptrs["SetSetting"])
+        c_del = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32)(ptrs["DeleteProfileSetting"])
+
+        if c_init() != 0:
+            return False, None
+        h_session = ctypes.c_void_p()
+        if c_create(ctypes.byref(h_session)) != 0:
+            return False, None
+        try:
+            if c_load(h_session) != 0:
+                return False, None
+            h_profile = ctypes.c_void_p()
+            if c_base(h_session, ctypes.byref(h_profile)) != 0:
+                return False, None
+
+            setting = _NVDRS_SETTING()
+            setting.version = ctypes.sizeof(_NVDRS_SETTING) | (1 << 16)
+
+            if azione == "get":
+                st = c_get(h_session, h_profile, _NVAPI_FRL_FPS_ID, ctypes.byref(setting))
+                if st == 0:
+                    return True, int(setting.current.u32Value)
+                if st == -160:  # NVAPI_SETTING_NOT_FOUND
+                    return True, None
+                return False, None
+
+            if azione == "set":
+                fps_val = max(int(valore or 0), 0)
+                setting.settingId = _NVAPI_FRL_FPS_ID
+                setting.settingType = 0
+                setting.current.u32Value = fps_val
+                if c_set(h_session, h_profile, ctypes.byref(setting)) != 0:
+                    return False, None
+                return c_save(h_session) == 0, fps_val
+
+            if azione == "delete":
+                st = c_del(h_session, h_profile, _NVAPI_FRL_FPS_ID)
+                if st not in (0, -160):
+                    return False, None
+                return c_save(h_session) == 0, None
+
+            return False, None
+        finally:
+            c_destroy(h_session)
+    except Exception:
+        return False, None
+
+
+def applica_fps_cap_gaming(monitor_info: dict | None = None) -> dict:
+    """Imposta il Max Frame Rate NVIDIA globale a (refresh_hz - FPS_CAP_MARGIN_HZ) in base al monitor principale, salvando lo stato precedente."""
+    mon = monitor_info if monitor_info is not None else info_monitor_principale()
+    hz = int(mon.get("refresh_hz") or 0)
+    w = int(mon.get("larghezza") or 0)
+    h = int(mon.get("altezza") or 0)
+    if hz < 35:
+        return {"applicato": False, "target_fps": 0, "refresh_hz": hz, "messaggio": ""}
+
+    target_fps = max(hz - FPS_CAP_MARGIN_HZ, FPS_CAP_MIN)
+    ok_get, prev_val = _nvapi_drs_frl_fps("get")
+    if not ok_get:
+        return {"applicato": False, "target_fps": target_fps, "refresh_hz": hz, "messaggio": ""}
+
+    stato = _carica_gaming_state()
+    if "prev_nvidia_frl_fps" not in stato:
+        stato["prev_nvidia_frl_fps"] = {
+            "esisteva": prev_val is not None,
+            "valore": prev_val,
+        }
+        _salva_gaming_state(stato)
+
+    ok_set, _ = _nvapi_drs_frl_fps("set", target_fps)
+    if not ok_set:
+        return {"applicato": False, "target_fps": target_fps, "refresh_hz": hz, "messaggio": ""}
+
+    res_str = f"{w}x{h} @ {hz} Hz" if (w and h) else f"{hz} Hz"
+    return {
+        "applicato": True,
+        "target_fps": target_fps,
+        "refresh_hz": hz,
+        "messaggio": f"Limite FPS NVIDIA (Max Frame Rate): {target_fps} FPS (monitor principale {res_str}, margine -{FPS_CAP_MARGIN_HZ} Hz).",
+    }
+
+
+def ripristina_fps_cap_gaming() -> str:
+    """Ripristina il Max Frame Rate NVIDIA precedente salvato prima della Gaming Mode (anche dopo riavvio dell'app)."""
+    stato = _carica_gaming_state()
+    snap = stato.get("prev_nvidia_frl_fps")
+    if not isinstance(snap, dict):
+        return ""
+
+    esisteva = bool(snap.get("esisteva"))
+    prev_val = snap.get("valore")
+    if esisteva and isinstance(prev_val, int) and prev_val > 0:
+        ok, _ = _nvapi_drs_frl_fps("set", prev_val)
+        esito = f" Limite FPS NVIDIA ripristinato a {prev_val} FPS." if ok else ""
+    else:
+        ok, _ = _nvapi_drs_frl_fps("delete")
+        esito = " Limite FPS NVIDIA rimosso (Disattivato)." if ok else ""
+
+    stato.pop("prev_nvidia_frl_fps", None)
+    _salva_gaming_state(stato)
+    return esito
+
+
+def apri_pannello_nvidia() -> bool:
+    """Apre il Pannello di Controllo NVIDIA in modo sicuro (senza shell)."""
+    try:
+        subprocess.Popen(
+            ["explorer.exe", r"shell:AppsFolder\NVIDIACorp.NVIDIAControlPanel_56jybvy8sckqj!NVIDIACorp.NVIDIAControlPanel"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+        )
+        return True
+    except Exception:
+        try:
+            nvcpl = r"C:\Program Files\NVIDIA Corporation\Control Panel Client\nvcplui.exe"
+            if os.path.exists(nvcpl):
+                subprocess.Popen([nvcpl], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+        except Exception:
+            pass
+    return False
+
 
 def imposta_priorita_background_gaming(bassa: bool) -> list[str]:
     """Abbassa a BELOW_NORMAL (o ripristina a NORMAL) la priorità CPU dei processi background in GAMING_THROTTLE_PROCESSES senza chiuderli."""
@@ -872,6 +1128,7 @@ def attiva_modalita_prestazioni() -> str:
     )
 
     ottimizzazioni_reg = applica_ottimizzazioni_registro_gaming()
+    fps_cap = applica_fps_cap_gaming()
     imposta_priorita_processo_corrente(True)
     throttled = imposta_priorita_background_gaming(True)
 
@@ -913,6 +1170,8 @@ def attiva_modalita_prestazioni() -> str:
         righe.append(f"Tuning piano energetico: {', '.join(tuning_piano)}.")
     if ottimizzazioni_reg:
         righe.append(f"Ottimizzazioni Windows (HKCU): {', '.join(ottimizzazioni_reg)}.")
+    if fps_cap.get("applicato") and fps_cap.get("messaggio"):
+        righe.append(fps_cap["messaggio"])
     righe.append(
         f"Processi chiusi: {', '.join(sorted(chiusi)) if chiusi else 'Nessuno'} "
         f"| RAM liberata: {_formatta_ram_liberata(ram_liberata)}."
@@ -926,7 +1185,7 @@ def attiva_modalita_prestazioni() -> str:
 
 
 def ripristina_modalita_bilanciata() -> str:
-    """Riporta Windows al piano energetico precedente (o Bilanciato) e ripristina registro HKCU e priorità normale dell'app."""
+    """Riporta Windows al piano energetico precedente (o Bilanciato) e ripristina registro HKCU, limite FPS NVIDIA e priorità normale dell'app."""
     stato = _carica_gaming_state()
     prev_guid = stato.get("prev_power_guid", "")
     if prev_guid and _UUID_RE.fullmatch(prev_guid):
@@ -941,6 +1200,7 @@ def ripristina_modalita_bilanciata() -> str:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
     )
     ripristinati = ripristina_ottimizzazioni_registro_gaming()
+    extra_fps = ripristina_fps_cap_gaming()
     imposta_priorita_processo_corrente(False)
     imposta_priorita_background_gaming(False)
 
@@ -950,7 +1210,7 @@ def ripristina_modalita_bilanciata() -> str:
     _salva_gaming_state(stato)
 
     extra_reg = f" Ripristinate {ripristinati} impostazioni Windows (notifiche/GameBar)." if ripristinati else ""
-    return f"Piano energetico riportato su '{target_nome}'.{extra_reg} Telemetria standard ({TELEMETRY_INTERVAL_NORMAL}s) e priorità normale ripristinate."
+    return f"Piano energetico riportato su '{target_nome}'.{extra_reg}{extra_fps} Telemetria standard ({TELEMETRY_INTERVAL_NORMAL}s) e priorità normale ripristinate."
 
 
 _SERVIZI_IN_PAUSA: list[str] = []
@@ -1143,12 +1403,39 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
     if (tipo_ram == "DDR4" and 0 < freq_ram <= 2133) or (tipo_ram == "DDR5" and 0 < freq_ram <= 4800):
         avvisi.append(f"RAM {tipo_ram} a {freq_ram} MHz (frequenza base): verifica se XMP/EXPO è attivo nel BIOS.")
 
+    # 6. Bilanciamento CPU-bound / DLDSR su GPU NVIDIA RTX con margine di risoluzione
+    consiglia_dldsr = None
+    mon = info_monitor_principale()
+    gpu_nome = str(gpu.get("gpu", "")) if "errore" not in gpu else ""
+    try:
+        vram_tot_mb = int(float(gpu.get("vram_totale_mb", 0))) if "errore" not in gpu else 0
+    except (ValueError, TypeError):
+        vram_tot_mb = 0
+    cpu_threads = psutil.cpu_count(logical=True) or 0
+    mw, mh = mon.get("larghezza", 0), mon.get("altezza", 0)
+    if (
+        "rtx" in gpu_nome.lower()
+        and vram_tot_mb >= 6000
+        and 0 < cpu_threads <= 6
+        and mw > 0 and mh > 0
+        and (mw * mh) <= (2560 * 1440)
+        and not mon.get("dldsr_attivo", False)
+    ):
+        r178 = f"{round(mw * 1.3333)}x{round(mh * 1.3333)}"
+        r225 = f"{round(mw * 1.5)}x{round(mh * 1.5)}"
+        consiglia_dldsr = {"nativa": f"{mw}x{mh}", "res_178": r178, "res_225": r225}
+        avvisi.append(
+            f"DLDSR non attivo su sistema CPU-bound ({cpu_threads} thread + {gpu_nome.replace('NVIDIA GeForce ', '')} su {mw}x{mh}): "
+            f"abilita Fattori DSR 1.78x DL ({r178}) o 2.25x DL ({r225}) nel Pannello NVIDIA e alza la qualità grafica nei giochi "
+            "per spostare carico sulla GPU e rendere il frametime più regolare."
+        )
+
     if avvisi:
         testo = "Check-up pre-partita — avvisi rilevati:\n" + "\n".join(f"  - {a}" for a in avvisi)
     else:
         testo = "Check-up pre-partita: tutto OK, nessun collo di bottiglia rilevato."
 
-    return {"ok": len(avvisi) == 0, "avvisi": avvisi, "testo": testo}
+    return {"ok": len(avvisi) == 0, "avvisi": avvisi, "testo": testo, "consiglia_dldsr": consiglia_dldsr}
 
 def pulisci_file_temporanei() -> str:
     """Elimina i file temporanei non in uso dalla cartella TEMP di Windows."""
