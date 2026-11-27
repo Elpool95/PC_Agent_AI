@@ -5,6 +5,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
 GAMING_STATE_FILE = os.path.join(REPORTS_DIR, "gaming_state.json")
 
+# Versione corrente dell'applicazione (Semantic Versioning: MAJOR.MINOR.PATCH)
+APP_VERSION = "1.0.0"
+
 # Carica eventuali variabili da un file .env locale (root o config/.env) senza dipendenze esterne
 for _env_path in (
     os.path.join(BASE_DIR, ".env"),

@@ -33,3 +33,4 @@ Progetto desktop Python/Tkinter per Windows 10/11: telemetria hardware live + ot
 - Dopo modifiche Python, verificare sempre con:
   `python -m py_compile config/settings.py modules/tools.py modules/ai_agent.py modules/agent_win11.py`
 - Messaggi di commit in stile Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`).
+- **Versioning (`SemVer` `MAJOR.MINOR.PATCH`)**: a ogni release `patch` (fix), `minor` (nuove funzionalità retrocompatibili) o `major` (breaking changes), aggiornare sempre il contatore di versione in `config/settings.py` (`APP_VERSION`), in `README.md` e in `doc/changelog.md`.
