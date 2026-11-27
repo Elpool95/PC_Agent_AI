@@ -3,9 +3,9 @@ import time
 import tkinter as tk
 from tkinter import scrolledtext
 import psutil
-import config
-import tools
-from ai_agent import GeminiAgent
+from config import settings as config
+from modules import tools
+from modules.ai_agent import GeminiAgent
 
 class PCAgentGUI:
     def __init__(self, root):

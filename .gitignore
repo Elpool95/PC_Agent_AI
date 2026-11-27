@@ -3,4 +3,6 @@ __pycache__/
 .venv/
 venv/
 errore.log
+reports/*.log
 .env
+config/.env

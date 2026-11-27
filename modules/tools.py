@@ -8,7 +8,7 @@ import tempfile
 import urllib.request
 import winreg
 import psutil
-from config import SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW
+from config.settings import SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW
 
 def _trova_nvidia_smi() -> str:
     """Trova il percorso assoluto di nvidia-smi.exe su Windows."""

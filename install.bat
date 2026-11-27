@@ -44,11 +44,11 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [3/4] Configurazione file .env...
-if not exist ".env" (
-    if exist ".env.example" (
-        copy /Y ".env.example" ".env" >nul
-        echo File .env creato da .env.example. Ricordati di inserire la tua GEMINI_API_KEY!
+echo [3/4] Configurazione file config\.env...
+if not exist "config\.env" if not exist ".env" (
+    if exist "config\.env.example" (
+        copy /Y "config\.env.example" "config\.env" >nul
+        echo File config\.env creato da config\.env.example. Ricordati di inserire la tua GEMINI_API_KEY!
     )
 )
 
@@ -62,7 +62,7 @@ if %errorlevel%==0 (
 
 echo.
 echo Installazione completata!
-echo - Inserisci la tua GEMINI_API_KEY nel file .env (o nelle variabili d'ambiente Windows).
+echo - Inserisci la tua GEMINI_API_KEY nel file config\.env (o nelle variabili d'ambiente Windows).
 echo - Avvia l'app con avvia_agent.bat o dal collegamento sul Desktop.
 echo.
 pause

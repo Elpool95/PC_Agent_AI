@@ -2,8 +2,8 @@ import psutil
 import time
 from google import genai
 from google.genai import types
-from config import GEMINI_MODEL, GEMINI_FALLBACK_MODELS, GEMINI_TIMEOUT_MS
-import tools
+from config.settings import GEMINI_MODEL, GEMINI_FALLBACK_MODELS, GEMINI_TIMEOUT_MS
+from modules import tools
 
 class GeminiAgent:
     def __init__(self):

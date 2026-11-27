@@ -40,9 +40,9 @@ Assistente desktop per **Windows 10/11** con telemetria hardware in tempo reale,
 2. Fai doppio clic su **`install.bat`**:
    - Crea un ambiente virtuale isolato (`.venv`)
    - Installa le dipendenze da `requirements.txt`
-   - Crea il file `.env` da `.env.example`
+   - Crea il file `config/.env` da `config/.env.example`
    - Crea automaticamente l'icona di avvio **"PC Agent AI"** sul Desktop
-3. Apri il file `.env` e inserisci la tua API Key:
+3. Apri il file `config/.env` e inserisci la tua API Key:
    ```env
    GEMINI_API_KEY=la_tua_chiave_api
    ```
@@ -51,4 +51,11 @@ Assistente desktop per **Windows 10/11** con telemetria hardware in tempo reale,
 
 ## Personalizzazione
 
-Puoi modificare soglie di allerta, modelli Gemini, app chiudibili in `Gaming Mode` e processi protetti in `config.py`.
+Puoi modificare soglie di allerta, modelli Gemini, app chiudibili in `Gaming Mode` e processi protetti in `config/settings.py`.
+
+## Struttura del progetto
+
+- `config/` — configurazioni e soglie (`settings.py`)
+- `modules/` — moduli applicativi (`agent_win11.py`, `ai_agent.py`, `tools.py`)
+- `reports/` — log runtime
+- `.agents/` — regole (`rules/`) e skill (`skills/`) per coding agent
