@@ -63,7 +63,9 @@ def monitora_gpu() -> dict:
             "--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw,fan.speed,clocks.gr,pstate",
             "--format=csv,noheader,nounits"
         ]
-        output = subprocess.check_output(cmd, encoding="utf-8", stderr=subprocess.STDOUT, creationflags=NO_WINDOW).strip()
+        output = subprocess.check_output(
+            cmd, encoding="utf-8", stderr=subprocess.STDOUT, timeout=5, creationflags=NO_WINDOW
+        ).strip()
         prima_riga = output.splitlines()[0]
         nome, util, temp, vram_usata, vram_tot, watt, fan, clock, pstate = [x.strip() for x in prima_riga.split(",")]
         try:
@@ -180,7 +182,7 @@ def mappa_dischi_fisici(lettere=None) -> dict:
         ps_cmd = 'Get-Partition | Where-Object {$_.DriveLetter} | ForEach-Object {"$($_.DriveLetter):PhysicalDrive$($_.DiskNumber)"}'
         output = subprocess.check_output(
             ["powershell", "-NoProfile", "-Command", ps_cmd],
-            encoding="utf-8", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+            encoding="utf-8", stderr=subprocess.DEVNULL, timeout=10, creationflags=NO_WINDOW
         ).strip()
         for riga in output.splitlines():
             if ":" in riga:
@@ -223,7 +225,7 @@ def info_versioni_sistema() -> dict:
         smi = _trova_nvidia_smi()
         out = subprocess.check_output(
             [smi, "--query-gpu=driver_version", "--format=csv,noheader"],
-            encoding="utf-8", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+            encoding="utf-8", stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
         ).strip()
         if out:
             driver_str = out.splitlines()[0].strip()
@@ -252,7 +254,7 @@ def info_banchi_ram() -> dict:
         )
         output = subprocess.check_output(
             ["powershell", "-NoProfile", "-Command", ps_cmd],
-            encoding="utf-8", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+            encoding="utf-8", stderr=subprocess.DEVNULL, timeout=10, creationflags=NO_WINDOW
         ).strip()
         if output:
             dati = json.loads(output)
@@ -335,27 +337,30 @@ def formatta_velocita_rete(bytes_sec: float) -> str:
     return f"{bps / 1_000:.1f} Kbps"
 
 def misura_ping(host: str = "1.1.1.1") -> dict:
-    """Misura la latenza di rete (ping in ms) verso un host (default 1.1.1.1)."""
+    """Misura la latenza di rete (ping in ms) verso un host valido (default 1.1.1.1)."""
+    host_clean = str(host).strip()
+    if not host_clean or host_clean.startswith(("-", "/")) or not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host_clean):
+        return {"host": host_clean, "ms": None, "stato": "Host non valido"}
     try:
         out = subprocess.check_output(
-            ["ping", "-n", "1", "-w", "1000", host],
-            encoding="cp850", errors="ignore", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+            ["ping", "-n", "1", "-w", "1000", host_clean],
+            encoding="cp850", errors="ignore", stderr=subprocess.DEVNULL, timeout=3, creationflags=NO_WINDOW
         )
         m = re.search(r"(?:durata|time)\s*([<=])\s*(\d+)\s*ms", out, re.IGNORECASE)
         if m:
             op, val = m.group(1), int(m.group(2))
             stato = f"<{val} ms" if op == "<" else f"{val} ms"
-            return {"host": host, "ms": val, "stato": stato}
-        return {"host": host, "ms": None, "stato": "Timeout"}
+            return {"host": host_clean, "ms": val, "stato": stato}
+        return {"host": host_clean, "ms": None, "stato": "Timeout"}
     except Exception:
-        return {"host": host, "ms": None, "stato": "N/D"}
+        return {"host": host_clean, "ms": None, "stato": "N/D"}
 
 def piano_energetico_attivo() -> dict:
     """Rileva il piano energetico di Windows attualmente attivo."""
     try:
         out = subprocess.check_output(
-            "powercfg /getactivescheme",
-            shell=True, encoding="cp850", errors="ignore", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+            ["powercfg", "/getactivescheme"],
+            encoding="cp850", errors="ignore", stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
         ).strip()
         m_guid = re.search(r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", out)
         m_nome = re.search(r"\((.+)\)", out)
@@ -393,10 +398,16 @@ def _dimensione_cartella_bytes(percorso: str) -> int:
     return tot
 
 def analizza_spazio_disco(unita: str = "C:") -> dict:
-    """Analizza le principali cartelle cache/utente sul disco indicato per individuare cosa occupa spazio."""
-    unita_norm = unita.strip().rstrip("\\").upper()
-    if len(unita_norm) == 1:
+    """Analizza le principali cartelle cache/utente sul disco indicato (es. 'C:') per individuare cosa occupa spazio."""
+    unita_norm = str(unita).strip().rstrip("\\").upper()
+    if len(unita_norm) == 1 and unita_norm.isalpha():
         unita_norm += ":"
+    if not re.fullmatch(r"[A-Z]:", unita_norm) or not os.path.exists(unita_norm + "\\"):
+        return {
+            "unita": unita_norm,
+            "errore": f"Unità '{unita}' non valida o non accessibile.",
+            "cartelle_analizzate": []
+        }
     user_home = os.path.expanduser("~")
     win_dir = os.environ.get("SystemRoot", r"C:\Windows")
     candidati = [
@@ -433,8 +444,8 @@ _PROCESSI_SISTEMA_PROTETTI = {
 def termina_processo(target: str) -> str:
     """Termina in modo sicuro un processo dato il suo PID numerico o il nome esatto (es. 'notepad.exe'). Blocca sempre processi di sistema e protetti."""
     target_str = str(target).strip()
-    if not target_str:
-        return "Specificare un PID o un nome processo valido."
+    if not target_str or any(c in target_str for c in ("\\", "/", ";", "&", "|", "`", "$", "\n", "\r")):
+        return "Specificare un PID numerico o un nome processo valido (senza percorsi o metacaratteri)."
 
     bloccati = PROTECTED_PROCESSES | _PROCESSI_SISTEMA_PROTETTI
     mio_pid = os.getpid()
@@ -542,7 +553,7 @@ def _trova_o_crea_prestazioni_eccellenti() -> str | None:
     """Trova il GUID del piano 'Prestazioni eccellenti' o lo sblocca se nascosto."""
     try:
         out = subprocess.check_output(
-            "powercfg /list", shell=True, encoding="cp850", errors="ignore", creationflags=NO_WINDOW
+            ["powercfg", "/list"], encoding="cp850", errors="ignore", timeout=5, creationflags=NO_WINDOW
         )
         for riga in out.splitlines():
             if "eccellenti" in riga.lower() or "ultimate performance" in riga.lower():
@@ -552,8 +563,8 @@ def _trova_o_crea_prestazioni_eccellenti() -> str | None:
 
         # Se non esiste ancora, lo sblocca duplicando il modello di sistema
         dup = subprocess.check_output(
-            "powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb61",
-            shell=True, encoding="cp850", errors="ignore", creationflags=NO_WINDOW
+            ["powercfg", "-duplicatescheme", "e9a42b02-d5df-448d-aa00-03f14749eb61"],
+            encoding="cp850", errors="ignore", timeout=5, creationflags=NO_WINDOW
         )
         m = re.search(r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", dup)
         if m:
@@ -567,14 +578,14 @@ def attiva_modalita_prestazioni() -> str:
     guid_eccellenti = _trova_o_crea_prestazioni_eccellenti()
     if guid_eccellenti:
         subprocess.run(
-            f"powercfg /setactive {guid_eccellenti}",
-            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+            ["powercfg", "/setactive", guid_eccellenti],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
         )
         nome_piano = "Prestazioni eccellenti"
     else:
         subprocess.run(
-            "powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
-            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+            ["powercfg", "/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
         )
         nome_piano = "Prestazioni elevate (fallback)"
 
@@ -597,8 +608,8 @@ def attiva_modalita_prestazioni() -> str:
 def ripristina_modalita_bilanciata() -> str:
     """Riporta Windows al piano energetico Bilanciato per ridurre consumi e calore."""
     subprocess.run(
-        "powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e",
-        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+        ["powercfg", "/setactive", "381b4222-f694-41f0-9685-ff5bb260df2e"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
     )
     return "Piano energetico riportato su 'Bilanciato'."
 
