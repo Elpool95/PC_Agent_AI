@@ -15,7 +15,7 @@ class PCAgentGUI:
         self.root.minsize(820, 620)
         self.root.configure(bg="#1e1e1e")
 
-        self.agent = GeminiAgent()
+        self.agent = None
 
         # --- BARRA TELEMETRIA IN TEMPO REALE ---
         tele_frame = tk.Frame(root, bg="#141414", bd=1, relief=tk.SOLID)
@@ -45,11 +45,13 @@ class PCAgentGUI:
         row2 = tk.Frame(tele_frame, bg="#141414")
         row2.pack(fill=tk.X, padx=8, pady=2)
 
-        self.lbl_disk = tk.Label(
+        self.disk_frame = row2
+        self.disk_labels = {}
+        self.lbl_disk_placeholder = tk.Label(
             row2, text="Dischi: rilevamento in corso...", bg="#141414", fg="#ce93d8",
             font=("Consolas", 10, "bold"), justify=tk.LEFT, anchor="w"
         )
-        self.lbl_disk.pack(side=tk.LEFT, fill=tk.X, padx=4)
+        self.lbl_disk_placeholder.grid(row=0, column=0, sticky="w", padx=4)
 
         row3 = tk.Frame(tele_frame, bg="#141414")
         row3.pack(fill=tk.X, padx=8, pady=2)
@@ -68,7 +70,7 @@ class PCAgentGUI:
         btn_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
 
         tk.Button(
-            btn_frame, text="Top CPU Process", bg="#2d2d30", fg="#ffffff",
+            btn_frame, text="Top Process", bg="#2d2d30", fg="#ffffff",
             activebackground="#3e3e42", activeforeground="#ffffff",
             relief=tk.FLAT, padx=10, pady=5,
             command=lambda: threading.Thread(target=self.azione_stato_locale, daemon=True).start()
@@ -169,6 +171,10 @@ class PCAgentGUI:
         testo_footer = f"OS: {info['windows']}   |   Driver Grafico NVIDIA: {info['driver_gpu']}"
         self.root.after(0, lambda: self.lbl_footer.config(text=testo_footer))
 
+        piano = tools.piano_energetico_attivo()
+        if piano["modalita"] in ("gaming", "bilanciato"):
+            self.root.after(0, self._imposta_stato_modalita, piano["modalita"])
+
         ram_hw = tools.info_banchi_ram()
         self.ram_info_hw = ram_hw
         banchi = ram_hw.get("banchi", [])
@@ -182,6 +188,11 @@ class PCAgentGUI:
         else:
             testo_banchi = "Banchi RAM: N/D"
         self.root.after(0, lambda: self.lbl_ram_banchi.config(text=testo_banchi))
+
+        self.agent = GeminiAgent()
+        if self.agent.errore_init:
+            err = self.agent.errore_init
+            self.root.after(0, self.aggiungi_testo, "Sistema", f"Avviso Agent AI offline ({err}). La telemetria locale resta attiva.\n")
 
     def _imposta_stato_modalita(self, modalita):
         if modalita == "gaming":
@@ -197,9 +208,12 @@ class PCAgentGUI:
         prev_io = psutil.disk_io_counters(perdisk=True)
         prev_net = psutil.net_io_counters(pernic=True)
         prev_time = time.time()
+        ultimo_ping = "-- ms"
+        ciclo = 0
 
         while True:
             time.sleep(2)
+            ciclo += 1
             try:
                 now = time.time()
                 dt = max(now - prev_time, 0.1)
@@ -211,35 +225,34 @@ class PCAgentGUI:
                     lettere_correnti = nuove_lettere
                     mappa_dischi = tools.mappa_dischi_fisici()
 
-                parti_dischi = []
+                dischi_items = []
                 for lettera in lettere_correnti:
                     try:
                         uso = psutil.disk_usage(f"{lettera}:\\")
                         liberi = round(uso.free / (1024**3), 0)
-                        info = f"{lettera}: {uso.percent}% ({int(liberi)}GB liberi)"
+                        avviso = " [!]" if uso.percent >= config.DISK_CRIT else ""
+                        info = f"{lettera}: {uso.percent}%{avviso} ({int(liberi)}GB liberi)"
+                        colore = "#ff5252" if uso.percent >= config.DISK_CRIT else ("#ffb74d" if uso.percent >= config.DISK_WARN else "#ce93d8")
                     except Exception:
                         info = f"{lettera}: N/D"
+                        colore = "#ce93d8"
 
                     drive_fisico = mappa_dischi.get(lettera)
                     if drive_fisico and drive_fisico in curr_io and drive_fisico in prev_io:
                         r_mb = round((curr_io[drive_fisico].read_bytes - prev_io[drive_fisico].read_bytes) / dt / (1024 * 1024), 1)
                         w_mb = round((curr_io[drive_fisico].write_bytes - prev_io[drive_fisico].write_bytes) / dt / (1024 * 1024), 1)
                         info += f" R {r_mb}/W {w_mb} MB/s"
-                    parti_dischi.append(info)
+                    dischi_items.append((lettera, info, colore))
 
                 prev_io, prev_time = curr_io, now
-                if parti_dischi:
-                    righe_dischi = [
-                        "  |  ".join(parti_dischi[i:i + 2])
-                        for i in range(0, len(parti_dischi), 2)
-                    ]
-                    disk_text = "\n".join(righe_dischi)
-                else:
-                    disk_text = "Nessun disco rilevato"
-                disk_color = "#ce93d8"
 
                 cpu = psutil.cpu_percent(interval=None)
-                cpu_temp, cpu_watt = tools.leggi_sensori_cpu()
+                sensori_cpu = tools.leggi_sensori_cpu()
+                cpu_temp = sensori_cpu["temperatura_c"]
+                cpu_watt = sensori_cpu["potenza_w"]
+                ventole = sensori_cpu["ventole_rpm"]
+                ventole_str = f"  |  {' '.join(ventole[:3])}" if ventole else ""
+
                 ram = psutil.virtual_memory()
                 ram_used = round(ram.used / (1024**3), 1)
                 ram_tot = round(ram.total / (1024**3), 1)
@@ -256,7 +269,8 @@ class PCAgentGUI:
                     temp_num = gpu["temperatura_num"]
                     gpu_text = (
                         f"RTX 3070: {gpu['utilizzo_percent']} | {gpu['temperatura_c']} | "
-                        f"VRAM: {gpu['vram_usata_mb']}/{gpu['vram_totale_mb']} MB | Consumo: {gpu['consumo_watt']}"
+                        f"VRAM: {gpu['vram_usata_mb']}/{gpu['vram_totale_mb']} MB | "
+                        f"{gpu['consumo_watt']} | Fan: {gpu['ventola_percent']} | {gpu['clock_mhz']}"
                     )
                     gpu_color = "#ff5252" if temp_num >= config.GPU_TEMP_CRIT else ("#ffb74d" if temp_num >= config.GPU_TEMP_WARN else "#81c784")
 
@@ -266,6 +280,8 @@ class PCAgentGUI:
                     net_text = "Rete: Offline"
                     net_color = "#ff5252"
                 else:
+                    if ciclo == 1 or ciclo % 3 == 0:
+                        ultimo_ping = tools.misura_ping()["stato"]
                     if nome_nic in curr_net and nome_nic in prev_net:
                         dl_bs = (curr_net[nome_nic].bytes_recv - prev_net[nome_nic].bytes_recv) / dt
                         ul_bs = (curr_net[nome_nic].bytes_sent - prev_net[nome_nic].bytes_sent) / dt
@@ -275,7 +291,7 @@ class PCAgentGUI:
                     link_str = f" {rete['link_mbps']} Mbps" if rete["link_mbps"] else ""
                     dl_str = tools.formatta_velocita_rete(dl_bs)
                     ul_str = tools.formatta_velocita_rete(ul_bs)
-                    net_text = f"Rete ({nome_nic}{link_str} | {rete['ip']}): ↓ {dl_str} | ↑ {ul_str}"
+                    net_text = f"Rete ({nome_nic}{link_str} | {rete['ip']}): ↓ {dl_str} | ↑ {ul_str} | Ping: {ultimo_ping}"
                     net_color = "#4db6ac"
                 prev_net = curr_net
 
@@ -285,21 +301,43 @@ class PCAgentGUI:
 
                 self.root.after(
                     0, self._aggiorna_barra,
-                    f"CPU: {cpu}% | {cpu_temp} | {cpu_watt}", cpu_color,
+                    f"CPU: {cpu}% | {cpu_temp} | {cpu_watt}{ventole_str}", cpu_color,
                     f"RAM: {ram_used}/{ram_tot} GB ({ram.percent}%){ram_extra}", ram_color,
-                    disk_text, disk_color,
+                    dischi_items,
                     gpu_text, gpu_color,
                     net_text, net_color
                 )
             except Exception:
                 pass
 
-    def _aggiorna_barra(self, cpu_txt, cpu_col, ram_txt, ram_col, disk_txt, disk_col, gpu_txt, gpu_col, net_txt, net_col):
+    def _aggiorna_barra(self, cpu_txt, cpu_col, ram_txt, ram_col, dischi_items, gpu_txt, gpu_col, net_txt, net_col):
         self.lbl_cpu.config(text=cpu_txt, fg=cpu_col)
         self.lbl_ram.config(text=ram_txt, fg=ram_col)
-        self.lbl_disk.config(text=disk_txt, fg=disk_col)
+        self._aggiorna_dischi_ui(dischi_items)
         self.lbl_gpu.config(text=gpu_txt, fg=gpu_col)
         self.lbl_net.config(text=net_txt, fg=net_col)
+
+    def _aggiorna_dischi_ui(self, dischi_items):
+        if self.lbl_disk_placeholder is not None:
+            self.lbl_disk_placeholder.destroy()
+            self.lbl_disk_placeholder = None
+
+        lettere_nuove = [item[0] for item in dischi_items]
+        if lettere_nuove != list(self.disk_labels.keys()):
+            for lbl in self.disk_labels.values():
+                lbl.destroy()
+            self.disk_labels = {}
+            for idx, (lettera, testo, colore) in enumerate(dischi_items):
+                r, c = divmod(idx, 2)
+                lbl = tk.Label(
+                    self.disk_frame, text=testo, bg="#141414", fg=colore,
+                    font=("Consolas", 10, "bold"), anchor="w"
+                )
+                lbl.grid(row=r, column=c, sticky="w", padx=(4, 24))
+                self.disk_labels[lettera] = lbl
+        else:
+            for lettera, testo, colore in dischi_items:
+                self.disk_labels[lettera].config(text=testo, fg=colore)
 
     def aggiungi_testo(self, mittente, testo):
         self.chat_area.config(state=tk.NORMAL)
@@ -318,14 +356,22 @@ class PCAgentGUI:
 
     def azione_stato_locale(self):
         sys_info = tools.analizza_sistema()
-        top = "\n".join([f"  - {p['name']} (PID {p['pid']}): {p['cpu_percent']}%" for p in sys_info['top_processi_cpu']])
-        self.root.after(0, self.aggiungi_testo, "Sistema", f"Top 5 processi sulla CPU:\n{top}\n")
+        top_cpu = "\n".join([f"  - {p['name']} (PID {p['pid']}): {p['cpu_percent']}%" for p in sys_info['top_processi_cpu']])
+        top_ram = "\n".join([f"  - {p['name']} (PID {p['pid']}): {p['ram_mb']} MB" for p in sys_info['top_processi_ram']])
+        testo = f"Top 5 processi CPU:\n{top_cpu}\nTop 5 processi RAM:\n{top_ram}\n"
+        self.root.after(0, self.aggiungi_testo, "Sistema", testo)
 
     def azione_dischi_locale(self):
         dischi = tools.monitora_archiviazione()
         righe = ["Stato partizioni e dischi:"]
         for d in dischi:
-            righe.append(f"  - {d['unita']}  Usati: {d['usati_gb']}/{d['totali_gb']} GB ({d['percent']}%) | Liberi: {d['liberi_gb']} GB")
+            avviso = "  [SPAZIO CRITICO]" if d['percent'] >= config.DISK_CRIT else ""
+            righe.append(f"  - {d['unita']}  Usati: {d['usati_gb']}/{d['totali_gb']} GB ({d['percent']}%) | Liberi: {d['liberi_gb']} GB{avviso}")
+        analisi_c = tools.analizza_spazio_disco("C:")
+        if analisi_c["cartelle_analizzate"]:
+            righe.append("Principali cartelle/cache su C::")
+            for c in analisi_c["cartelle_analizzate"]:
+                righe.append(f"  - {c['cartella']}: {c['mb']} MB ({c['percorso']})")
         righe.append("")
         self.root.after(0, self.aggiungi_testo, "Sistema", "\n".join(righe))
 
@@ -383,6 +429,8 @@ class PCAgentGUI:
         def avvisa_retry(num):
             self.root.after(0, self.aggiungi_testo, "Agent", f"Server occupato, nuovo tentativo {num}/3...")
 
+        if self.agent is None:
+            self.agent = GeminiAgent()
         risposta = self.agent.invia(testo, on_retry=avvisa_retry)
         self.root.after(0, self._mostra_risposta, risposta)
 

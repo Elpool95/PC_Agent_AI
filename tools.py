@@ -25,37 +25,47 @@ def _trova_nvidia_smi() -> str:
     return "nvidia-smi"
 
 def analizza_sistema() -> dict:
-    """Legge l'utilizzo attuale di CPU, RAM e i 5 processi più pesanti sulla CPU."""
+    """Legge l'utilizzo attuale di CPU, RAM, i 5 processi più pesanti sulla CPU e i 5 più pesanti sulla RAM."""
     cpu = psutil.cpu_percent(interval=1)
     ram = psutil.virtual_memory()
     processi = []
-    for p in psutil.process_iter(['pid', 'name', 'cpu_percent']):
+    for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info']):
         try:
-            if p.info['name'] != 'System Idle Process':
-                processi.append(p.info)
+            nome = p.info['name']
+            if nome and nome != 'System Idle Process':
+                mem = p.info.get('memory_info')
+                ram_mb = round(mem.rss / (1024 * 1024), 1) if mem else 0.0
+                processi.append({
+                    'pid': p.info['pid'],
+                    'name': nome,
+                    'cpu_percent': p.info['cpu_percent'] or 0.0,
+                    'ram_mb': ram_mb
+                })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-    top_cpu = sorted(processi, key=lambda x: x['cpu_percent'] or 0, reverse=True)[:5]
+    top_cpu = sorted(processi, key=lambda x: x['cpu_percent'], reverse=True)[:5]
+    top_ram = sorted(processi, key=lambda x: x['ram_mb'], reverse=True)[:5]
     return {
         "cpu_percent": cpu,
         "ram_percent": ram.percent,
         "ram_usata_gb": round(ram.used / (1024**3), 2),
         "ram_totale_gb": round(ram.total / (1024**3), 2),
-        "top_processi_cpu": top_cpu
+        "top_processi_cpu": top_cpu,
+        "top_processi_ram": top_ram
     }
 
 def monitora_gpu() -> dict:
-    """Legge utilizzo, temperatura, VRAM usata/totale e consumo energetico della RTX 3070."""
+    """Legge utilizzo, temperatura, VRAM usata/totale, consumo W, ventola % e clock MHz della RTX 3070."""
     try:
         smi = _trova_nvidia_smi()
         cmd = [
             smi,
-            "--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw",
+            "--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total,power.draw,fan.speed,clocks.gr,pstate",
             "--format=csv,noheader,nounits"
         ]
         output = subprocess.check_output(cmd, encoding="utf-8", stderr=subprocess.STDOUT, creationflags=NO_WINDOW).strip()
         prima_riga = output.splitlines()[0]
-        nome, util, temp, vram_usata, vram_tot, watt = [x.strip() for x in prima_riga.split(",")]
+        nome, util, temp, vram_usata, vram_tot, watt, fan, clock, pstate = [x.strip() for x in prima_riga.split(",")]
         try:
             util_num = int(float(util))
         except ValueError:
@@ -72,7 +82,10 @@ def monitora_gpu() -> dict:
             "temperatura_num": temp_num,
             "vram_usata_mb": vram_usata,
             "vram_totale_mb": vram_tot,
-            "consumo_watt": f"{watt} W"
+            "consumo_watt": f"{watt} W",
+            "ventola_percent": f"{fan}%",
+            "clock_mhz": f"{clock} MHz",
+            "pstate": pstate
         }
     except Exception as e:
         return {"errore": str(e)}
@@ -113,20 +126,40 @@ def _cerca_potenza_cpu(nodo, target="CPU Package") -> str | None:
                 return trovato
     return None
 
-def leggi_sensori_cpu() -> tuple[str, str]:
-    """Legge temperatura (°C) e potenza (W) della CPU da LibreHardwareMonitor (http://localhost:8085/data.json)."""
+def _cerca_ventole_attive(nodo, risultati=None) -> list[str]:
+    """Cerca le ventole di sistema attive (> 0 RPM, esclusa GPU) nel JSON di LibreHardwareMonitor."""
+    if risultati is None:
+        risultati = []
+    if isinstance(nodo, dict):
+        testo = nodo.get("Text", "")
+        valore = nodo.get("Value", "")
+        if "RPM" in valore and "gpu" not in testo.lower():
+            m = re.search(r"(\d+)", valore)
+            if m and int(m.group(1)) > 0:
+                etichetta = testo.replace("Fan #", "F").strip()
+                risultati.append(f"{etichetta}: {m.group(1)} RPM")
+        for figlio in nodo.get("Children", []):
+            _cerca_ventole_attive(figlio, risultati)
+    elif isinstance(nodo, list):
+        for elem in nodo:
+            _cerca_ventole_attive(elem, risultati)
+    return risultati
+
+def leggi_sensori_cpu() -> dict:
+    """Legge temperatura (°C), potenza (W) della CPU e ventole di sistema (RPM) da LibreHardwareMonitor."""
     try:
         with urllib.request.urlopen("http://localhost:8085/data.json", timeout=0.4) as resp:
             dati = json.loads(resp.read().decode("utf-8"))
             temp = _cerca_temp_cpu(dati) or "N/D"
             watt = _cerca_potenza_cpu(dati, "CPU Package") or _cerca_potenza_cpu(dati, "CPU Cores") or "N/D"
-            return temp, watt
+            ventole = _cerca_ventole_attive(dati)
+            return {"temperatura_c": temp, "potenza_w": watt, "ventole_rpm": ventole}
     except Exception:
-        return "-- °C (avvia LHM)", "-- W"
+        return {"temperatura_c": "-- °C (avvia LHM)", "potenza_w": "-- W", "ventole_rpm": []}
 
 def leggi_temp_cpu() -> str:
     """Legge la temperatura della CPU da LibreHardwareMonitor (http://localhost:8085/data.json) se attivo."""
-    return leggi_sensori_cpu()[0]
+    return leggi_sensori_cpu()["temperatura_c"]
 
 def elenca_lettere_dischi() -> list[str]:
     """Restituisce tutte le lettere di unità disco attualmente montate e accessibili."""
@@ -292,6 +325,159 @@ def formatta_velocita_rete(bytes_sec: float) -> str:
     if bps >= 1_000_000:
         return f"{bps / 1_000_000:.2f} Mbps"
     return f"{bps / 1_000:.1f} Kbps"
+
+def misura_ping(host: str = "1.1.1.1") -> dict:
+    """Misura la latenza di rete (ping in ms) verso un host (default 1.1.1.1)."""
+    try:
+        out = subprocess.check_output(
+            ["ping", "-n", "1", "-w", "1000", host],
+            encoding="cp850", errors="ignore", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+        )
+        m = re.search(r"(?:durata|time)\s*([<=])\s*(\d+)\s*ms", out, re.IGNORECASE)
+        if m:
+            op, val = m.group(1), int(m.group(2))
+            stato = f"<{val} ms" if op == "<" else f"{val} ms"
+            return {"host": host, "ms": val, "stato": stato}
+        return {"host": host, "ms": None, "stato": "Timeout"}
+    except Exception:
+        return {"host": host, "ms": None, "stato": "N/D"}
+
+def piano_energetico_attivo() -> dict:
+    """Rileva il piano energetico di Windows attualmente attivo."""
+    try:
+        out = subprocess.check_output(
+            "powercfg /getactivescheme",
+            shell=True, encoding="cp850", errors="ignore", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+        ).strip()
+        m_guid = re.search(r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", out)
+        m_nome = re.search(r"\((.+)\)", out)
+        guid = m_guid.group(1) if m_guid else ""
+        nome = m_nome.group(1).strip() if m_nome else out
+        nome_low = nome.lower()
+        if any(k in nome_low for k in ("eccellenti", "elevate", "ultimate", "high performance")):
+            modalita = "gaming"
+        elif any(k in nome_low for k in ("bilanciato", "balanced")):
+            modalita = "bilanciato"
+        else:
+            modalita = "altro"
+        return {"guid": guid, "nome": nome, "modalita": modalita}
+    except Exception:
+        return {"guid": "", "nome": "N/D", "modalita": "altro"}
+
+def _dimensione_cartella_bytes(percorso: str) -> int:
+    """Calcola la dimensione totale in byte di una cartella ignorando errori di permessi."""
+    tot = 0
+    stack = [percorso]
+    while stack:
+        curr = stack.pop()
+        try:
+            with os.scandir(curr) as it:
+                for entry in it:
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            tot += entry.stat(follow_symlinks=False).st_size
+                        elif entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return tot
+
+def analizza_spazio_disco(unita: str = "C:") -> dict:
+    """Analizza le principali cartelle cache/utente sul disco indicato per individuare cosa occupa spazio."""
+    unita_norm = unita.strip().rstrip("\\").upper()
+    if len(unita_norm) == 1:
+        unita_norm += ":"
+    user_home = os.path.expanduser("~")
+    candidati = [
+        ("File Temporanei Utente", tempfile.gettempdir()),
+        ("Windows Temp", r"C:\Windows\Temp"),
+        ("Windows Update Cache", r"C:\Windows\SoftwareDistribution\Download"),
+        ("NVIDIA DXCache", os.path.join(user_home, r"AppData\Local\NVIDIA\DXCache")),
+        ("NVIDIA GLCache", os.path.join(user_home, r"AppData\Local\NVIDIA\GLCache")),
+        ("Download Utente", os.path.join(user_home, "Downloads")),
+    ]
+    risultati = []
+    for etichetta, path in candidati:
+        if path.upper().startswith(unita_norm) and os.path.exists(path):
+            mb = round(_dimensione_cartella_bytes(path) / (1024 * 1024), 1)
+            risultati.append({"cartella": etichetta, "percorso": path, "mb": mb})
+    risultati.sort(key=lambda x: x["mb"], reverse=True)
+    uso = psutil.disk_usage(unita_norm + "\\")
+    return {
+        "unita": unita_norm,
+        "percent": uso.percent,
+        "liberi_gb": round(uso.free / (1024**3), 1),
+        "totali_gb": round(uso.total / (1024**3), 1),
+        "cartelle_analizzate": risultati
+    }
+
+_PROCESSI_SISTEMA_PROTETTI = {
+    "system", "system idle process", "registry", "smss.exe", "csrss.exe",
+    "wininit.exe", "winlogon.exe", "services.exe", "lsass.exe", "svchost.exe",
+    "dwm.exe", "explorer.exe", "taskmgr.exe", "audiodg.exe", "fontdrvhost.exe",
+    "memory compression", "sihost.exe", "ctfmon.exe", "searchhost.exe",
+    "librehardwaremonitor.exe"
+}
+
+def termina_processo(target: str) -> str:
+    """Termina in modo sicuro un processo dato il suo PID numerico o il nome esatto (es. 'notepad.exe'). Blocca sempre processi di sistema e protetti."""
+    target_str = str(target).strip()
+    if not target_str:
+        return "Specificare un PID o un nome processo valido."
+
+    bloccati = PROTECTED_PROCESSES | _PROCESSI_SISTEMA_PROTETTI
+    mio_pid = os.getpid()
+
+    if target_str.isdigit():
+        pid = int(target_str)
+        if pid == mio_pid:
+            return "Operazione bloccata: non posso terminare me stesso."
+        try:
+            p = psutil.Process(pid)
+            nome = p.name()
+            if nome.lower() in bloccati:
+                return f"Operazione bloccata: '{nome}' (PID {pid}) è un processo protetto o di sistema."
+            p.terminate()
+            return f"Processo '{nome}' (PID {pid}) terminato correttamente."
+        except psutil.NoSuchProcess:
+            return f"Nessun processo trovato con PID {pid}."
+        except psutil.AccessDenied:
+            return f"Permessi insufficienti per terminare il PID {pid}."
+        except Exception as e:
+            return f"Errore durante la terminazione del PID {pid}: {e}"
+
+    nome_target = target_str.lower()
+    if not nome_target.endswith(".exe"):
+        nome_target_exe = nome_target + ".exe"
+    else:
+        nome_target_exe = nome_target
+
+    if nome_target in bloccati or nome_target_exe in bloccati:
+        return f"Operazione bloccata: '{target_str}' è un processo protetto o di sistema."
+
+    terminati = 0
+    errori_permessi = 0
+    for p in psutil.process_iter(['pid', 'name']):
+        try:
+            nome = (p.info['name'] or "").lower()
+            if nome in (nome_target, nome_target_exe):
+                if p.info['pid'] == mio_pid:
+                    continue
+                p.terminate()
+                terminati += 1
+        except psutil.AccessDenied:
+            errori_permessi += 1
+        except psutil.NoSuchProcess:
+            pass
+
+    if terminati > 0:
+        extra = f" ({errori_permessi} istanze non terminate per permessi insufficienti)" if errori_permessi else ""
+        return f"Terminati {terminati} processi '{target_str}'{extra}."
+    if errori_permessi > 0:
+        return f"Permessi insufficienti per terminare '{target_str}'."
+    return f"Nessun processo attivo trovato con nome '{target_str}'."
 
 def monitora_archiviazione() -> list:
     """Legge spazio usato, libero e percentuale di tutte le partizioni fisse."""

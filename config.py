@@ -10,6 +10,8 @@ CPU_CRIT = 85
 GPU_TEMP_WARN = 70
 GPU_TEMP_CRIT = 80
 RAM_CRIT = 85
+DISK_WARN = 80
+DISK_CRIT = 90
 
 # Processi sicuri da chiudere in Modalità Gaming
 SAFE_TO_CLOSE = [
