@@ -66,13 +66,20 @@ def test_gui_disk_colors_per_individual_drive(gui_app):
 
 def test_gui_mode_toggle_and_clear_console(gui_app):
     app, root, _ = gui_app
-    app._imposta_stato_modalita("gaming")
-    assert "●" in app.btn_gaming.cget("text")
-    assert app.btn_bilanciato.cget("text") == "Balance"
+    with patch("modules.tools.imposta_priorita_processo_corrente", return_value=True) as mock_prio:
+        app._imposta_stato_modalita("gaming")
+        assert "●" in app.btn_gaming.cget("text")
+        assert app.btn_bilanciato.cget("text") == "Balance"
+        assert app._telemetry_interval == 10
+        assert app._ping_paused is True
+        mock_prio.assert_called_with(True)
 
-    app._imposta_stato_modalita("bilanciato")
-    assert "●" in app.btn_bilanciato.cget("text")
-    assert app.btn_gaming.cget("text") == "Gaming Mode"
+        app._imposta_stato_modalita("bilanciato")
+        assert "●" in app.btn_bilanciato.cget("text")
+        assert app.btn_gaming.cget("text") == "Gaming Mode"
+        assert app._telemetry_interval == 2
+        assert app._ping_paused is False
+        mock_prio.assert_called_with(False)
 
     app.aggiungi_testo("Tu", "messaggio di prova")
     assert "messaggio di prova" in app.chat_area.get("1.0", tk.END)
@@ -111,18 +118,19 @@ def test_gui_loop_telemetria_single_tick(gui_app):
     app, root, _ = gui_app
     app.ram_info_hw = {"frequenza_mhz": 2133, "tipo": "DDR4", "modalita_canale": "Dual Channel"}
 
-    sleep_calls = {"n": 0}
-    def fake_sleep(_sec):
-        sleep_calls["n"] += 1
-        if sleep_calls["n"] > 1:
+    wait_calls = {"n": 0}
+    def fake_wait(timeout=None):
+        wait_calls["n"] += 1
+        if wait_calls["n"] > 1:
             raise KeyboardInterrupt()
+        return False
 
     io_disk = {"PhysicalDrive0": SimpleNamespace(read_bytes=1024 * 1024, write_bytes=2 * 1024 * 1024)}
     io_net = {"Ethernet": SimpleNamespace(bytes_recv=100_000, bytes_sent=50_000)}
     fake_ram = SimpleNamespace(used=8 * 1024**3, total=24 * 1024**3, percent=33.3)
     fake_disk = SimpleNamespace(free=50 * 1024**3, percent=92.0)
 
-    with patch("time.sleep", side_effect=fake_sleep), \
+    with patch.object(app._telemetry_wake, "wait", side_effect=fake_wait), \
          patch("modules.tools.elenca_lettere_dischi", return_value=["C"]), \
          patch("modules.tools.mappa_dischi_fisici", return_value={"C": "PhysicalDrive0"}), \
          patch("psutil.disk_io_counters", return_value=io_disk), \
@@ -147,6 +155,27 @@ def test_gui_loop_telemetria_single_tick(gui_app):
     assert "Ping: 12 ms" in app.lbl_net.cget("text")
     assert app.disk_labels["C"].cget("fg") == "#ff5252"
 
+    # Verifica pausa ping in Gaming Mode (Eco Telemetry)
+    wait_calls["n"] = 0
+    app._ping_paused = True
+    with patch.object(app._telemetry_wake, "wait", side_effect=fake_wait), \
+         patch("modules.tools.elenca_lettere_dischi", return_value=["C"]), \
+         patch("modules.tools.mappa_dischi_fisici", return_value={"C": "PhysicalDrive0"}), \
+         patch("psutil.disk_io_counters", return_value=io_disk), \
+         patch("psutil.net_io_counters", return_value=io_net), \
+         patch("psutil.disk_usage", return_value=fake_disk), \
+         patch("psutil.cpu_percent", return_value=22.0), \
+         patch("psutil.virtual_memory", return_value=fake_ram), \
+         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "40 °C", "potenza_w": "20 W", "ventole_rpm": []}), \
+         patch("modules.tools.monitora_gpu", return_value={"errore": "N/D"}), \
+         patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
+         patch("modules.tools.misura_ping") as mock_ping:
+        with pytest.raises(KeyboardInterrupt):
+            app._loop_telemetria()
+        root.update()
+    mock_ping.assert_not_called()
+    assert "Ping: Pausa (Gaming)" in app.lbl_net.cget("text")
+
 
 def test_gui_local_actions_and_chat_flow(gui_app):
     app, root, _ = gui_app
@@ -166,15 +195,26 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         assert "SPAZIO CRITICO" in app.chat_area.get("1.0", tk.END)
 
     with patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \
-         patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"):
+         patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"), \
+         patch("modules.tools.diagnostica_pre_partita", return_value={"ok": True, "avvisi": [], "testo": "Check-up OK"}), \
+         patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
+         patch.object(app, "_chiedi_conferma_utente", return_value=True), \
+         patch("modules.tools.pausa_servizi_gaming", return_value="Servizi in pausa OK"):
         app.azione_gaming_locale()
         root.update()
-        assert "Perf OK" in app.chat_area.get("1.0", tk.END)
+        txt = app.chat_area.get("1.0", tk.END)
+        assert "Perf OK" in txt
+        assert "Check-up OK" in txt
+        assert "Servizi in pausa OK" in txt
 
-    with patch("modules.tools.ripristina_modalita_bilanciata", return_value="Bil OK"):
+    with patch("modules.tools.ripristina_modalita_bilanciata", return_value="Bil OK"), \
+         patch("modules.tools.ha_servizi_gaming_in_pausa", return_value=True), \
+         patch("modules.tools.riavvia_servizi_gaming", return_value="Servizi riavviati OK"):
         app.azione_bilanciato_locale()
         root.update()
-        assert "Bil OK" in app.chat_area.get("1.0", tk.END)
+        txt = app.chat_area.get("1.0", tk.END)
+        assert "Bil OK" in txt
+        assert "Servizi riavviati OK" in txt
 
     with patch("modules.tools.elenca_app_avvio", return_value={"utente_corrente": {"App1": "x"}, "sistema": {}}):
         app.azione_avvio_locale()

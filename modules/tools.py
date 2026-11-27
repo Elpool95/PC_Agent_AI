@@ -9,7 +9,11 @@ import tempfile
 import urllib.request
 import winreg
 import psutil
-from config.settings import SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW
+from config.settings import (
+    SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW,
+    DISK_CRIT, GPU_TEMP_WARN, GAMING_PAUSABLE_SERVICES,
+    GAMING_STATE_FILE,
+)
 
 def _trova_nvidia_smi() -> str:
     """Trova il percorso assoluto di nvidia-smi.exe su Windows."""
@@ -584,45 +588,424 @@ def _trova_o_crea_prestazioni_eccellenti() -> str | None:
         pass
     return None
 
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+_POWERCFG_GAMING_TWEAKS = (
+    ("USB Suspend OFF", "2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "0"),
+    ("PCIe Power Mgmt OFF", "501a4d13-42af-4429-9fd1-a8218c268e20", "ee12f906-d277-404b-b6da-e5fa1a576df5", "0"),
+    ("Disk Standby OFF", "0012ee47-9041-4b5d-9b77-535fba8b1442", "6738e2c4-e8a5-4a42-b16a-e040e769756e", "0"),
+)
+
+_GAMING_REG_SETTINGS = (
+    ("Windows Game Mode ON", r"Software\Microsoft\GameBar", "AutoGameModeEnabled", 1),
+    ("Game DVR OFF", r"Software\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", 0),
+    ("Game DVR Store OFF", r"System\GameConfigStore", "GameDVR_Enabled", 0),
+    ("Notifiche Toast OFF", r"Software\Microsoft\Windows\CurrentVersion\PushNotifications", "ToastEnabled", 0),
+)
+
+_GAMING_REG_SNAPSHOT: dict[tuple[str, str], tuple[bool, int | None]] = {}
+
+
+def _carica_gaming_state() -> dict:
+    """Carica lo snapshot persistente della Gaming Mode da disco (se presente)."""
+    try:
+        if os.path.isfile(GAMING_STATE_FILE):
+            with open(GAMING_STATE_FILE, "r", encoding="utf-8") as f:
+                dati = json.load(f)
+                if isinstance(dati, dict):
+                    return dati
+    except Exception:
+        pass
+    return {}
+
+
+def _salva_gaming_state(stato: dict) -> None:
+    """Salva lo snapshot persistente della Gaming Mode su disco (o rimuove il file se vuoto)."""
+    if not stato:
+        _rimuovi_gaming_state()
+        return
+    try:
+        os.makedirs(os.path.dirname(GAMING_STATE_FILE), exist_ok=True)
+        with open(GAMING_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(stato, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _rimuovi_gaming_state() -> None:
+    """Elimina il file di snapshot della Gaming Mode se presente."""
+    try:
+        if os.path.isfile(GAMING_STATE_FILE):
+            os.remove(GAMING_STATE_FILE)
+    except Exception:
+        pass
+
+
+def _ottimizza_piano_gaming(guid: str) -> list[str]:
+    """Applica il tuning fino via powercfg al piano Gaming (USB, PCIe, Disk Standby)."""
+    if not guid or not _UUID_RE.fullmatch(guid):
+        return []
+    applicati = []
+    for etichetta, sub_guid, setting_guid, valore in _POWERCFG_GAMING_TWEAKS:
+        try:
+            res = subprocess.run(
+                ["powercfg", "/setacvalueindex", guid, sub_guid, setting_guid, valore],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
+            )
+            if res.returncode == 0:
+                applicati.append(etichetta)
+        except Exception:
+            pass
+    return applicati
+
+
+def applica_ottimizzazioni_registro_gaming() -> list[str]:
+    """Applica ottimizzazioni Windows Gaming su HKCU (senza UAC) salvando lo stato precedente anche su disco."""
+    stato = _carica_gaming_state()
+    reg_disk = stato.get("reg_snapshot")
+    if isinstance(reg_disk, dict):
+        for k_str, val in reg_disk.items():
+            if "|" in k_str and isinstance(val, list) and len(val) == 2:
+                sub, name = k_str.split("|", 1)
+                _GAMING_REG_SNAPSHOT.setdefault((sub, name), (bool(val[0]), val[1]))
+
+    applicati = []
+    for etichetta, subpath, val_name, target_val in _GAMING_REG_SETTINGS:
+        try:
+            with winreg.CreateKeyEx(
+                winreg.HKEY_CURRENT_USER, subpath, 0, winreg.KEY_READ | winreg.KEY_SET_VALUE
+            ) as key:
+                snap_key = (subpath, val_name)
+                if snap_key not in _GAMING_REG_SNAPSHOT:
+                    try:
+                        prev_val, _ = winreg.QueryValueEx(key, val_name)
+                        _GAMING_REG_SNAPSHOT[snap_key] = (True, int(prev_val))
+                    except (FileNotFoundError, OSError, ValueError, TypeError):
+                        _GAMING_REG_SNAPSHOT[snap_key] = (False, None)
+                winreg.SetValueEx(key, val_name, 0, winreg.REG_DWORD, target_val)
+                applicati.append(etichetta)
+        except Exception:
+            pass
+
+    if _GAMING_REG_SNAPSHOT:
+        stato["reg_snapshot"] = {
+            f"{sub}|{name}": [esisteva, prev_val]
+            for (sub, name), (esisteva, prev_val) in _GAMING_REG_SNAPSHOT.items()
+        }
+        _salva_gaming_state(stato)
+    return applicati
+
+
+def ripristina_ottimizzazioni_registro_gaming() -> int:
+    """Ripristina le chiavi HKCU modificate dalla Gaming Mode (anche dopo riavvio dell'app)."""
+    stato = _carica_gaming_state()
+    if not _GAMING_REG_SNAPSHOT:
+        reg_disk = stato.get("reg_snapshot")
+        if isinstance(reg_disk, dict):
+            for k_str, val in reg_disk.items():
+                if "|" in k_str and isinstance(val, list) and len(val) == 2:
+                    sub, name = k_str.split("|", 1)
+                    _GAMING_REG_SNAPSHOT[(sub, name)] = (bool(val[0]), val[1])
+
+    ripristinati = 0
+    for (subpath, val_name), (esisteva, prev_val) in list(_GAMING_REG_SNAPSHOT.items()):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, subpath, 0, winreg.KEY_SET_VALUE) as key:
+                if esisteva and prev_val is not None:
+                    winreg.SetValueEx(key, val_name, 0, winreg.REG_DWORD, prev_val)
+                else:
+                    try:
+                        winreg.DeleteValue(key, val_name)
+                    except FileNotFoundError:
+                        pass
+                ripristinati += 1
+        except Exception:
+            pass
+    _GAMING_REG_SNAPSHOT.clear()
+    if "reg_snapshot" in stato:
+        stato.pop("reg_snapshot", None)
+        _salva_gaming_state(stato)
+    return ripristinati
+
+
+def imposta_priorita_processo_corrente(bassa: bool) -> bool:
+    """Imposta la priorità del processo corrente su BELOW_NORMAL (Gaming Mode) o NORMAL (Balance)."""
+    try:
+        proc = psutil.Process(os.getpid())
+        target = psutil.BELOW_NORMAL_PRIORITY_CLASS if bassa else psutil.NORMAL_PRIORITY_CLASS
+        proc.nice(target)
+        return True
+    except Exception:
+        return False
+
+
+def _formatta_ram_liberata(byte_count: int) -> str:
+    """Formatta i byte di RAM liberati in MB o GB leggibili."""
+    mb = max(byte_count, 0) / (1024 * 1024)
+    if mb >= 1024:
+        return f"{mb / 1024:.2f} GB"
+    return f"{mb:.1f} MB"
+
+
 def attiva_modalita_prestazioni() -> str:
-    """Attiva il piano energetico Prestazioni Eccellenti e chiude le app pesanti in background (escludendo i processi protetti)."""
+    """Attiva il piano energetico Gaming con tuning USB/PCIe/Disk, ottimizzazioni HKCU, priorità ridotta dell'app e chiusura sicura delle app background."""
     guid_eccellenti = _trova_o_crea_prestazioni_eccellenti()
     if guid_eccellenti:
-        subprocess.run(
-            ["powercfg", "/setactive", guid_eccellenti],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
-        )
+        guid_attivo = guid_eccellenti
         nome_piano = "Prestazioni eccellenti"
     else:
-        subprocess.run(
-            ["powercfg", "/setactive", "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
-        )
+        guid_attivo = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
         nome_piano = "Prestazioni elevate (fallback)"
 
+    # Salva il piano energetico precedente nello snapshot persistente (solo se non già salvato)
+    stato = _carica_gaming_state()
+    if not stato.get("prev_power_guid"):
+        piano_prec = piano_energetico_attivo()
+        prev_guid = piano_prec.get("guid", "")
+        if prev_guid and _UUID_RE.fullmatch(prev_guid) and prev_guid.lower() != guid_attivo.lower():
+            stato["prev_power_guid"] = prev_guid
+            stato["prev_power_nome"] = piano_prec.get("nome") or "Bilanciato"
+            _salva_gaming_state(stato)
+
+    tuning_piano = _ottimizza_piano_gaming(guid_attivo)
+    subprocess.run(
+        ["powercfg", "/setactive", guid_attivo],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
+    )
+
+    ottimizzazioni_reg = applica_ottimizzazioni_registro_gaming()
+    imposta_priorita_processo_corrente(True)
+
+    bloccati = PROTECTED_PROCESSES | _PROCESSI_SISTEMA_PROTETTI
+    ram_prima = psutil.virtual_memory().used
     chiusi = set()
-    for p in psutil.process_iter(['name']):
+    terminati_procs = []
+    rss_chiusi_bytes = 0
+
+    for p in psutil.process_iter(['name', 'memory_info']):
         try:
             nome = p.info['name']
             if not nome:
                 continue
             nome_lower = nome.lower()
-            if nome_lower in PROTECTED_PROCESSES:
+            if nome_lower in bloccati:
                 continue
             if nome_lower in SAFE_TO_CLOSE:
+                mem = p.info.get('memory_info')
+                if mem and getattr(mem, 'rss', 0):
+                    rss_chiusi_bytes += mem.rss
                 p.terminate()
+                terminati_procs.append(p)
                 chiusi.add(nome)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-    return f"Piano '{nome_piano}' attivato. Processi chiusi: {', '.join(chiusi) if chiusi else 'Nessuno'}."
+
+    if terminati_procs:
+        try:
+            psutil.wait_procs(terminati_procs, timeout=1.5)
+        except Exception:
+            pass
+
+    ram_dopo = psutil.virtual_memory().used
+    ram_liberata = max(max(ram_prima - ram_dopo, 0), rss_chiusi_bytes)
+
+    righe = [f"Piano '{nome_piano}' attivato."]
+    if tuning_piano:
+        righe.append(f"Tuning piano energetico: {', '.join(tuning_piano)}.")
+    if ottimizzazioni_reg:
+        righe.append(f"Ottimizzazioni Windows (HKCU): {', '.join(ottimizzazioni_reg)}.")
+    righe.append(
+        f"Processi chiusi: {', '.join(sorted(chiusi)) if chiusi else 'Nessuno'} "
+        f"| RAM liberata: {_formatta_ram_liberata(ram_liberata)}."
+    )
+    righe.append("Overhead PC Agent AI ridotto: telemetria Eco (10s), ping in pausa, priorità BELOW_NORMAL.")
+    return "\n".join(righe)
+
 
 def ripristina_modalita_bilanciata() -> str:
-    """Riporta Windows al piano energetico Bilanciato per ridurre consumi e calore."""
+    """Riporta Windows al piano energetico precedente (o Bilanciato) e ripristina registro HKCU e priorità normale dell'app."""
+    stato = _carica_gaming_state()
+    prev_guid = stato.get("prev_power_guid", "")
+    if prev_guid and _UUID_RE.fullmatch(prev_guid):
+        target_guid = prev_guid
+        target_nome = stato.get("prev_power_nome") or "Bilanciato"
+    else:
+        target_guid = "381b4222-f694-41f0-9685-ff5bb260df2e"
+        target_nome = "Bilanciato"
+
     subprocess.run(
-        ["powercfg", "/setactive", "381b4222-f694-41f0-9685-ff5bb260df2e"],
+        ["powercfg", "/setactive", target_guid],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
     )
-    return "Piano energetico riportato su 'Bilanciato'."
+    ripristinati = ripristina_ottimizzazioni_registro_gaming()
+    imposta_priorita_processo_corrente(False)
+
+    stato = _carica_gaming_state()
+    stato.pop("prev_power_guid", None)
+    stato.pop("prev_power_nome", None)
+    _salva_gaming_state(stato)
+
+    extra_reg = f" Ripristinate {ripristinati} impostazioni Windows (notifiche/GameBar)." if ripristinati else ""
+    return f"Piano energetico riportato su '{target_nome}'.{extra_reg} Telemetria standard (2s) e priorità normale ripristinate."
+
+
+_SERVIZI_IN_PAUSA: list[str] = []
+
+
+def _servizi_salvati_da_riavviare() -> list[str]:
+    """Unisce i servizi in pausa in memoria e quelli salvati nello snapshot persistente su disco."""
+    stato = _carica_gaming_state()
+    su_disco = stato.get("servizi_in_pausa", [])
+    unione = []
+    for s in list(_SERVIZI_IN_PAUSA) + (su_disco if isinstance(su_disco, list) else []):
+        if s in GAMING_PAUSABLE_SERVICES and s not in unione:
+            unione.append(s)
+    return unione
+
+
+def servizi_gaming_attivi() -> list[str]:
+    """Restituisce i servizi dell'allowlist GAMING_PAUSABLE_SERVICES attualmente in esecuzione."""
+    attivi = []
+    for nome in GAMING_PAUSABLE_SERVICES:
+        try:
+            svc = psutil.win_service_get(nome)
+            if svc.status() == "running":
+                attivi.append(nome)
+        except Exception:
+            pass
+    return attivi
+
+
+def ha_servizi_gaming_in_pausa() -> bool:
+    """Indica se esistono servizi messi in pausa dalla Gaming Mode (in memoria o su disco) da riavviare su Balance."""
+    return bool(_servizi_salvati_da_riavviare())
+
+
+def pausa_servizi_gaming(servizi: list[str] | None = None) -> str:
+    """Mette temporaneamente in pausa i servizi pesanti di Windows (richiede UAC) usando allowlist fissa."""
+    candidati = servizi_gaming_attivi() if servizi is None else [s for s in servizi if s in GAMING_PAUSABLE_SERVICES]
+    if not candidati:
+        return "Nessun servizio background pesante attivo da mettere in pausa."
+
+    nomi_ps = ",".join(candidati)
+    parametri = (
+        f'-NoProfile -WindowStyle Hidden -Command '
+        f'"Stop-Service -Name {nomi_ps} -Force -ErrorAction SilentlyContinue"'
+    )
+    try:
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", parametri, None, 0)
+        if ret > 32:
+            for s in candidati:
+                if s not in _SERVIZI_IN_PAUSA:
+                    _SERVIZI_IN_PAUSA.append(s)
+            stato = _carica_gaming_state()
+            stato["servizi_in_pausa"] = _servizi_salvati_da_riavviare()
+            _salva_gaming_state(stato)
+            return f"Servizi messi in pausa (UAC confermato): {', '.join(candidati)}. Verranno riavviati con Balance."
+        return "Pausa servizi annullata dall'utente nella finestra UAC."
+    except Exception as e:
+        return f"Errore durante la pausa dei servizi: {e}"
+
+
+def riavvia_servizi_gaming() -> str:
+    """Riavvia i servizi messi in pausa durante la Gaming Mode (anche dopo riavvio dell'app)."""
+    da_riavviare = _servizi_salvati_da_riavviare()
+    if not da_riavviare:
+        return ""
+
+    nomi_ps = ",".join(da_riavviare)
+    parametri = (
+        f'-NoProfile -WindowStyle Hidden -Command '
+        f'"Start-Service -Name {nomi_ps} -ErrorAction SilentlyContinue"'
+    )
+    try:
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "powershell.exe", parametri, None, 0)
+        if ret > 32:
+            _SERVIZI_IN_PAUSA.clear()
+            stato = _carica_gaming_state()
+            stato.pop("servizi_in_pausa", None)
+            _salva_gaming_state(stato)
+            return f"Servizi Windows riavviati (UAC confermato): {', '.join(da_riavviare)}."
+        return "Riavvio servizi annullato nella finestra UAC."
+    except Exception as e:
+        return f"Errore durante il riavvio dei servizi: {e}"
+
+
+def _leggi_hags_attivo() -> bool | None:
+    """Legge lo stato di HAGS (Hardware-Accelerated GPU Scheduling) dal registro HKLM (solo lettura)."""
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers", 0, winreg.KEY_READ
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, "HwSchMode")
+            return int(val) == 2
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return None
+
+
+def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
+    """Esegue un check-up rapido (sola lettura, zero UAC) segnalando solo eventuali colli di bottiglia reali."""
+    avvisi = []
+
+    # 1. HAGS (Hardware-Accelerated GPU Scheduling)
+    hags = _leggi_hags_attivo()
+    if hags is False:
+        avvisi.append("HAGS non attivo: abilitalo in Impostazioni > Schermo > Grafica per ridurre la latenza GPU.")
+
+    # 2. Rete (Wi-Fi / Offline / Ping alto)
+    rete = info_rete_attiva()
+    nome_rete = rete.get("nome", "Offline")
+    if nome_rete == "Offline":
+        avvisi.append("Rete offline: nessuna connessione attiva rilevata.")
+    else:
+        if any(k in nome_rete.lower() for k in ("wi-fi", "wifi", "wireless")):
+            avvisi.append(f"Connessione Wi-Fi ({nome_rete}): il cavo Ethernet garantisce ping più stabile.")
+        ping = misura_ping()
+        if ping.get("ms") is not None and ping["ms"] >= 50:
+            avvisi.append(f"Ping elevato verso 1.1.1.1 ({ping['stato']}): possibile congestione di rete.")
+
+    # 3. Spazio critico su C:
+    try:
+        uso_c = psutil.disk_usage("C:\\")
+        if uso_c.percent >= DISK_CRIT:
+            liberi_gb = round(uso_c.free / (1024**3), 1)
+            avvisi.append(f"Disco C: quasi pieno ({uso_c.percent}%, {liberi_gb} GB liberi): gli SSD rallentano oltre il {DISK_CRIT}%.")
+    except Exception:
+        pass
+
+    # 4. Temperature GPU / CPU già alte prima di iniziare
+    gpu = monitora_gpu()
+    if "errore" not in gpu and gpu.get("temperatura_num", 0) >= GPU_TEMP_WARN:
+        avvisi.append(f"Temperatura GPU già alta prima del gioco ({gpu['temperatura_c']}).")
+
+    sensori_cpu = leggi_sensori_cpu()
+    temp_cpu_str = sensori_cpu.get("temperatura_c", "")
+    m_cpu = re.search(r"(\d+(?:[.,]\d+)?)", temp_cpu_str)
+    if m_cpu:
+        try:
+            temp_cpu_val = float(m_cpu.group(1).replace(",", "."))
+            if temp_cpu_val >= 75.0:
+                avvisi.append(f"Temperatura CPU già alta prima del gioco ({temp_cpu_str}).")
+        except ValueError:
+            pass
+
+    # 5. RAM (Single Channel o frequenza base JEDEC / XMP spento)
+    ram_hw = ram_info if (ram_info and ram_info.get("banchi")) else info_banchi_ram()
+    if ram_hw.get("modalita_canale") == "Single Channel":
+        avvisi.append("RAM in Single Channel: il Dual Channel migliora sensibilmente gli 1% low.")
+    tipo_ram = ram_hw.get("tipo", "")
+    freq_ram = ram_hw.get("frequenza_mhz", 0) or 0
+    if (tipo_ram == "DDR4" and 0 < freq_ram <= 2133) or (tipo_ram == "DDR5" and 0 < freq_ram <= 4800):
+        avvisi.append(f"RAM {tipo_ram} a {freq_ram} MHz (frequenza base): verifica se XMP/EXPO è attivo nel BIOS.")
+
+    if avvisi:
+        testo = "Check-up pre-partita — avvisi rilevati:\n" + "\n".join(f"  - {a}" for a in avvisi)
+    else:
+        testo = "Check-up pre-partita: tutto OK, nessun collo di bottiglia rilevato."
+
+    return {"ok": len(avvisi) == 0, "avvisi": avvisi, "testo": testo}
 
 def pulisci_file_temporanei() -> str:
     """Elimina i file temporanei non in uso dalla cartella TEMP di Windows."""

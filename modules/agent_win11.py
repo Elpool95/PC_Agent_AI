@@ -169,6 +169,9 @@ class PCAgentGUI:
         self.aggiungi_testo("Agent", "Pronto. Telemetria live attiva: CPU (Temp + W), RAM, tutti i dischi, GPU e Rete.\n")
 
         self.ram_info_hw = {"banchi": [], "frequenza_mhz": 0, "tipo": "RAM", "modalita_canale": "", "totale_gb": 0}
+        self._telemetry_interval = config.TELEMETRY_INTERVAL_NORMAL
+        self._ping_paused = False
+        self._telemetry_wake = threading.Event()
 
         psutil.cpu_percent(interval=None)
         threading.Thread(target=self._carica_info_hw, daemon=True).start()
@@ -240,9 +243,17 @@ class PCAgentGUI:
         if modalita == "gaming":
             self.btn_gaming.config(text="Gaming Mode ●", bg="#2e7d32", activebackground="#388e3c")
             self.btn_bilanciato.config(text="Balance", bg="#2d2d30", activebackground="#3e3e42")
+            self._telemetry_interval = config.TELEMETRY_INTERVAL_GAMING
+            self._ping_paused = True
+            tools.imposta_priorita_processo_corrente(True)
+            self._telemetry_wake.set()
         elif modalita == "bilanciato":
             self.btn_gaming.config(text="Gaming Mode", bg="#2d2d30", activebackground="#3e3e42")
             self.btn_bilanciato.config(text="Balance ●", bg="#0277bd", activebackground="#0288d1")
+            self._telemetry_interval = config.TELEMETRY_INTERVAL_NORMAL
+            self._ping_paused = False
+            tools.imposta_priorita_processo_corrente(False)
+            self._telemetry_wake.set()
 
     def _loop_telemetria(self):
         lettere_correnti = tools.elenca_lettere_dischi()
@@ -254,7 +265,8 @@ class PCAgentGUI:
         ciclo = 0
 
         while True:
-            time.sleep(2)
+            self._telemetry_wake.wait(timeout=self._telemetry_interval)
+            self._telemetry_wake.clear()
             ciclo += 1
             try:
                 now = time.time()
@@ -323,8 +335,12 @@ class PCAgentGUI:
                     net_text = "Rete: Offline"
                     net_color = "#ff5252"
                 else:
-                    if ciclo == 1 or ciclo % 3 == 0:
-                        ultimo_ping = tools.misura_ping()["stato"]
+                    if self._ping_paused:
+                        ping_display = "Pausa (Gaming)"
+                    else:
+                        if ciclo == 1 or ciclo % 3 == 0:
+                            ultimo_ping = tools.misura_ping()["stato"]
+                        ping_display = ultimo_ping
                     if nome_nic in curr_net and nome_nic in prev_net:
                         dl_bs = (curr_net[nome_nic].bytes_recv - prev_net[nome_nic].bytes_recv) / dt
                         ul_bs = (curr_net[nome_nic].bytes_sent - prev_net[nome_nic].bytes_sent) / dt
@@ -334,7 +350,7 @@ class PCAgentGUI:
                     link_str = f" {rete['link_mbps']} Mbps" if rete["link_mbps"] else ""
                     dl_str = tools.formatta_velocita_rete(dl_bs)
                     ul_str = tools.formatta_velocita_rete(ul_bs)
-                    net_text = f"Rete ({nome_nic}{link_str} | {rete['ip']}): ↓ {dl_str} | ↑ {ul_str} | Ping: {ultimo_ping}"
+                    net_text = f"Rete ({nome_nic}{link_str} | {rete['ip']}): ↓ {dl_str} | ↑ {ul_str} | Ping: {ping_display}"
                     net_color = "#4db6ac"
                 prev_net = curr_net
 
@@ -421,13 +437,24 @@ class PCAgentGUI:
     def azione_gaming_locale(self):
         res_perf = tools.attiva_modalita_prestazioni()
         res_temp = tools.pulisci_file_temporanei()
+        checkup = tools.diagnostica_pre_partita(self.ram_info_hw)
         self.root.after(0, self._imposta_stato_modalita, "gaming")
-        self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_perf}\n{res_temp}\n")
+        self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_perf}\n{res_temp}\n{checkup['testo']}\n")
+
+        attivi = tools.servizi_gaming_attivi()
+        if attivi and self._chiedi_conferma_utente(
+            f"Vuoi mettere in pausa temporaneamente i servizi background di Windows ({', '.join(attivi)}) "
+            "per ridurre picchi disco e micro-stutter?\n\nRichiederà conferma UAC e verranno riavviati su 'Balance'."
+        ):
+            res_svc = tools.pausa_servizi_gaming(attivi)
+            self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_svc}\n")
 
     def azione_bilanciato_locale(self):
         res = tools.ripristina_modalita_bilanciata()
+        res_svc = tools.riavvia_servizi_gaming() if tools.ha_servizi_gaming_in_pausa() else ""
         self.root.after(0, self._imposta_stato_modalita, "bilanciato")
-        self.root.after(0, self.aggiungi_testo, "Sistema", f"{res}\n")
+        testo = f"{res}\n{res_svc}\n" if res_svc else f"{res}\n"
+        self.root.after(0, self.aggiungi_testo, "Sistema", testo)
 
     def azione_avvio_locale(self):
         apps = tools.elenca_app_avvio()

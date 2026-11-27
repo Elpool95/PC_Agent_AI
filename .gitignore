@@ -7,5 +7,6 @@ venv/
 errore.log
 reports/*.log
 reports/*.xml
+reports/gaming_state.json
 .env
 config/.env

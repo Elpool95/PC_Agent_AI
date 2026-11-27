@@ -164,30 +164,112 @@ def test_rete_and_ping_including_dast():
         assert tools.misura_ping(bad)["stato"] == "Host non valido"
 
 
-def test_piano_energetico_e_modalita():
+def test_piano_energetico_e_modalita(tmp_path):
+    state_file = str(tmp_path / "gaming_state.json")
     with patch("subprocess.check_output", return_value="GUID: 381b4222-f694-41f0-9685-ff5bb260df2e (Bilanciato)"):
         assert tools.piano_energetico_attivo()["modalita"] == "bilanciato"
     with patch("subprocess.check_output", return_value="GUID: 11111111-1111-1111-1111-111111111111 (Prestazioni eccellenti)"):
         assert tools.piano_energetico_attivo()["modalita"] == "gaming"
 
     fake_proc = MagicMock()
-    fake_proc.info = {"name": "chrome.exe"}
+    fake_proc.info = {"name": "chrome.exe", "memory_info": SimpleNamespace(rss=512 * 1024 * 1024)}
     prot_proc = MagicMock()
-    prot_proc.info = {"name": "discord.exe"}
+    prot_proc.info = {"name": "discord.exe", "memory_info": SimpleNamespace(rss=200 * 1024 * 1024)}
 
-    with patch("modules.tools._trova_o_crea_prestazioni_eccellenti", return_value="11111111-1111-1111-1111-111111111111"), \
-         patch("subprocess.run") as mock_run, \
+    fake_vm = SimpleNamespace(used=8 * 1024**3)
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools.piano_energetico_attivo", return_value={"guid": "381b4222-f694-41f0-9685-ff5bb260df2e", "nome": "Bilanciato", "modalita": "bilanciato"}), \
+         patch("modules.tools._trova_o_crea_prestazioni_eccellenti", return_value="11111111-1111-1111-1111-111111111111"), \
+         patch("subprocess.run", return_value=SimpleNamespace(returncode=0)) as mock_run, \
+         patch("modules.tools.applica_ottimizzazioni_registro_gaming", return_value=["Windows Game Mode ON", "Notifiche Toast OFF"]), \
+         patch("modules.tools.imposta_priorita_processo_corrente", return_value=True) as mock_prio, \
+         patch("psutil.virtual_memory", return_value=fake_vm), \
+         patch("psutil.wait_procs", return_value=([], [])), \
          patch("psutil.process_iter", return_value=[fake_proc, prot_proc]):
         msg = tools.attiva_modalita_prestazioni()
     assert "Prestazioni eccellenti" in msg
+    assert "USB Suspend OFF" in msg
+    assert "Windows Game Mode ON" in msg
     assert "chrome.exe" in msg
+    assert "512.0 MB" in msg
+    assert "BELOW_NORMAL" in msg
     fake_proc.terminate.assert_called_once()
     prot_proc.terminate.assert_not_called()
+    mock_prio.assert_called_once_with(True)
     assert mock_run.called
 
-    with patch("subprocess.run") as mock_run2:
-        assert "Bilanciato" in tools.ripristina_modalita_bilanciata()
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("subprocess.run") as mock_run2, \
+         patch("modules.tools.ripristina_ottimizzazioni_registro_gaming", return_value=4), \
+         patch("modules.tools.imposta_priorita_processo_corrente", return_value=True) as mock_prio2:
+        res_bil = tools.ripristina_modalita_bilanciata()
+        assert "Bilanciato" in res_bil
+        assert "4 impostazioni" in res_bil
         mock_run2.assert_called_once()
+        mock_prio2.assert_called_once_with(False)
+
+
+def test_gaming_tuning_powercfg_and_dast():
+    valid_guid = "11111111-1111-1111-1111-111111111111"
+    with patch("subprocess.run", return_value=SimpleNamespace(returncode=0)) as mock_run:
+        res = tools._ottimizza_piano_gaming(valid_guid)
+    assert res == ["USB Suspend OFF", "PCIe Power Mgmt OFF", "Disk Standby OFF"]
+    assert mock_run.call_count == 3
+
+    # DAST: GUID malformato o con metacaratteri shell bloccato
+    with patch("subprocess.run") as mock_bad:
+        assert tools._ottimizza_piano_gaming("bad-guid & calc.exe") == []
+        assert tools._ottimizza_piano_gaming("") == []
+        mock_bad.assert_not_called()
+
+
+def test_gaming_registro_hkcu_e_rollback(tmp_path):
+    state_file = str(tmp_path / "gaming_state.json")
+    tools._GAMING_REG_SNAPSHOT.clear()
+    mock_key = MagicMock()
+    mock_key.__enter__.return_value = mock_key
+
+    # Prima chiave esisteva (=1), le altre non esistevano (FileNotFoundError)
+    query_side = [(1, 4), FileNotFoundError(), FileNotFoundError(), (1, 4)]
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("winreg.CreateKeyEx", return_value=mock_key), \
+         patch("winreg.QueryValueEx", side_effect=query_side), \
+         patch("winreg.SetValueEx") as mock_set:
+        applicati = tools.applica_ottimizzazioni_registro_gaming()
+    assert len(applicati) == 4
+    assert mock_set.call_count == 4
+    assert len(tools._GAMING_REG_SNAPSHOT) == 4
+    assert os.path.isfile(state_file)
+
+    # Simula chiusura e riapertura dell'app azzerando lo snapshot in RAM
+    tools._GAMING_REG_SNAPSHOT.clear()
+
+    # Rollback da disco: 2 chiavi ripristinate con SetValueEx, 2 rimosse con DeleteValue
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("winreg.OpenKey", return_value=mock_key), \
+         patch("winreg.SetValueEx") as mock_restore_set, \
+         patch("winreg.DeleteValue") as mock_restore_del:
+        ripristinati = tools.ripristina_ottimizzazioni_registro_gaming()
+    assert ripristinati == 4
+    assert mock_restore_set.call_count == 2
+    assert mock_restore_del.call_count == 2
+    assert len(tools._GAMING_REG_SNAPSHOT) == 0
+    assert not os.path.exists(state_file)
+
+
+def test_priorita_processo_e_formatta_ram():
+    mock_proc = MagicMock()
+    with patch("psutil.Process", return_value=mock_proc):
+        assert tools.imposta_priorita_processo_corrente(True) is True
+        mock_proc.nice.assert_called_with(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        assert tools.imposta_priorita_processo_corrente(False) is True
+        mock_proc.nice.assert_called_with(psutil.NORMAL_PRIORITY_CLASS)
+
+    with patch("psutil.Process", side_effect=psutil.AccessDenied()):
+        assert tools.imposta_priorita_processo_corrente(True) is False
+
+    assert tools._formatta_ram_liberata(512 * 1024 * 1024) == "512.0 MB"
+    assert tools._formatta_ram_liberata(2 * 1024**3) == "2.00 GB"
 
 
 def test_analizza_spazio_disco_and_pulisci_temp(tmp_path):
@@ -308,3 +390,99 @@ def test_stato_sicurezza_lhm_e_blocco_lan():
     with patch("modules.tools.stato_sicurezza_lhm", return_value={"protetto_firewall": False}), \
          patch("ctypes.windll.shell32.ShellExecuteW", return_value=5):
         assert "annullata" in tools.blocca_lhm_da_lan().lower()
+
+
+def test_pausa_e_riavvio_servizi_gaming_and_dast(tmp_path):
+    state_file = str(tmp_path / "gaming_state.json")
+    tools._SERVIZI_IN_PAUSA.clear()
+
+    svc_running = SimpleNamespace(status=lambda: "running")
+    svc_stopped = SimpleNamespace(status=lambda: "stopped")
+    with patch("psutil.win_service_get", side_effect=[svc_running, svc_stopped, svc_running]):
+        assert tools.servizi_gaming_attivi() == ["WSearch", "DiagTrack"]
+
+    # DAST: servizi fuori allowlist o con metacaratteri shell vengono filtrati
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("ctypes.windll.shell32.ShellExecuteW") as mock_uac:
+        res_bad = tools.pausa_servizi_gaming(["vgc", "WSearch; calc.exe"])
+        assert "Nessun servizio" in res_bad
+        mock_uac.assert_not_called()
+
+    # Pausa UAC confermata (> 32), simulazione riavvio app (clear RAM), poi riavvio servizi da snapshot disco
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=42):
+        res_ok = tools.pausa_servizi_gaming(["WSearch", "SysMain"])
+        assert "messi in pausa" in res_ok
+        tools._SERVIZI_IN_PAUSA.clear()  # simula chiusura e riapertura app
+        assert tools.ha_servizi_gaming_in_pausa() is True
+
+        res_restart = tools.riavvia_servizi_gaming()
+        assert "riavviati" in res_restart
+        assert tools.ha_servizi_gaming_in_pausa() is False
+        assert not os.path.exists(state_file)
+
+    # Nessun servizio in pausa -> stringa vuota senza UAC
+    with patch("modules.tools.GAMING_STATE_FILE", state_file):
+        assert tools.riavvia_servizi_gaming() == ""
+
+    # UAC annullata (<= 32)
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=5):
+        assert "annullata" in tools.pausa_servizi_gaming(["WSearch"]).lower()
+        assert tools.ha_servizi_gaming_in_pausa() is False
+
+
+def test_snapshot_persistente_piano_personalizzato(tmp_path):
+    state_file = str(tmp_path / "gaming_state.json")
+    custom_guid = "99999999-8888-7777-6666-555555555555"
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools.piano_energetico_attivo", return_value={"guid": custom_guid, "nome": "AMD Ryzen Balanced", "modalita": "bilanciato"}), \
+         patch("modules.tools._trova_o_crea_prestazioni_eccellenti", return_value="11111111-1111-1111-1111-111111111111"), \
+         patch("subprocess.run", return_value=SimpleNamespace(returncode=0)), \
+         patch("modules.tools.applica_ottimizzazioni_registro_gaming", return_value=[]), \
+         patch("modules.tools.imposta_priorita_processo_corrente", return_value=True), \
+         patch("psutil.virtual_memory", return_value=SimpleNamespace(used=4 * 1024**3)), \
+         patch("psutil.process_iter", return_value=[]):
+        tools.attiva_modalita_prestazioni()
+
+    assert os.path.isfile(state_file)
+
+    with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("subprocess.run") as mock_restore_run, \
+         patch("modules.tools.ripristina_ottimizzazioni_registro_gaming", return_value=0), \
+         patch("modules.tools.imposta_priorita_processo_corrente", return_value=True):
+        res = tools.ripristina_modalita_bilanciata()
+    assert "AMD Ryzen Balanced" in res
+    mock_restore_run.assert_called_once()
+    assert custom_guid in mock_restore_run.call_args[0][0]
+    assert not os.path.exists(state_file)
+
+
+def test_diagnostica_pre_partita_ok_e_avvisi():
+    # Caso tutto OK
+    ram_ok = {"banchi": [{"gb": 8}, {"gb": 8}], "modalita_canale": "Dual Channel", "tipo": "DDR4", "frequenza_mhz": 3200}
+    with patch("modules.tools._leggi_hags_attivo", return_value=True), \
+         patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
+         patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
+         patch("psutil.disk_usage", return_value=SimpleNamespace(percent=50.0, free=200 * 1024**3)), \
+         patch("modules.tools.monitora_gpu", return_value={"temperatura_num": 40, "temperatura_c": "40°C"}), \
+         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "42,0 °C"}):
+        res_ok = tools.diagnostica_pre_partita(ram_ok)
+    assert res_ok["ok"] is True
+    assert "tutto OK" in res_ok["testo"]
+
+    # Caso con colli di bottiglia reali (HAGS off, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
+    ram_slow = {"banchi": [{"gb": 8}], "modalita_canale": "Single Channel", "tipo": "DDR4", "frequenza_mhz": 2133}
+    with patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch("modules.tools.info_rete_attiva", return_value={"nome": "Wi-Fi", "ip": "192.168.1.5", "link_mbps": 300}), \
+         patch("modules.tools.misura_ping", return_value={"ms": 85, "stato": "85 ms"}), \
+         patch("psutil.disk_usage", return_value=SimpleNamespace(percent=95.0, free=10 * 1024**3)), \
+         patch("modules.tools.monitora_gpu", return_value={"temperatura_num": 78, "temperatura_c": "78°C"}), \
+         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "80,5 °C"}):
+        res_warn = tools.diagnostica_pre_partita(ram_slow)
+    assert res_warn["ok"] is False
+    assert len(res_warn["avvisi"]) == 8
+    assert "HAGS" in res_warn["testo"]
+    assert "Wi-Fi" in res_warn["testo"]
+    assert "Single Channel" in res_warn["testo"]
+    assert "XMP/EXPO" in res_warn["testo"]

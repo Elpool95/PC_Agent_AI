@@ -3,6 +3,7 @@ import subprocess
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPORTS_DIR = os.path.join(BASE_DIR, "reports")
+GAMING_STATE_FILE = os.path.join(REPORTS_DIR, "gaming_state.json")
 
 # Carica eventuali variabili da un file .env locale (root o config/.env) senza dipendenze esterne
 for _env_path in (
@@ -42,10 +43,17 @@ RAM_CRIT = 85
 DISK_WARN = 80
 DISK_CRIT = 90
 
+# Intervalli di aggiornamento telemetria live (secondi)
+TELEMETRY_INTERVAL_NORMAL = 2
+TELEMETRY_INTERVAL_GAMING = 10
+
 # Processi sicuri da chiudere in Modalità Gaming
 SAFE_TO_CLOSE = [
-    "chrome.exe", "msedge.exe", "firefox.exe",
-    "onedrive.exe", "spotify.exe", "teams.exe"
+    "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe",
+    "onedrive.exe", "googledrivesync.exe", "dropbox.exe",
+    "spotify.exe", "teams.exe", "ms-teams.exe", "slack.exe",
+    "widgets.exe", "widgetservice.exe", "phoneexperiencehost.exe", "yourphone.exe",
+    "ccxprocess.exe", "adobe desktop service.exe",
 ]
 
 # Processi PROTETTI che non verranno MAI chiusi
@@ -55,5 +63,8 @@ PROTECTED_PROCESSES = {
     "discord.exe",
     "steam.exe", "steamwebhelper.exe", "steamservice.exe"
 }
+
+# Servizi Windows non essenziali mettibili temporaneamente in pausa in Gaming Mode (allowlist fissa)
+GAMING_PAUSABLE_SERVICES = ("WSearch", "SysMain", "DiagTrack")
 
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
