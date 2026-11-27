@@ -12,6 +12,7 @@ import psutil
 from config.settings import (
     SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW,
     DISK_CRIT, GPU_TEMP_WARN, GAMING_PAUSABLE_SERVICES,
+    GAMING_THROTTLE_PROCESSES,
     GAMING_STATE_FILE, TELEMETRY_INTERVAL_NORMAL, TELEMETRY_INTERVAL_GAMING,
 )
 
@@ -594,6 +595,7 @@ _POWERCFG_GAMING_TWEAKS = (
     ("USB Suspend OFF", "2a737441-1930-4402-8d77-b2bebba308a3", "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "0"),
     ("PCIe Power Mgmt OFF", "501a4d13-42af-4429-9fd1-a8218c268e20", "ee12f906-d277-404b-b6da-e5fa1a576df5", "0"),
     ("Disk Standby OFF", "0012ee47-9041-4b5d-9b77-535fba8b1442", "6738e2c4-e8a5-4a42-b16a-e040e769756e", "0"),
+    ("CPU Core Unpark 100%", "54533251-82be-4824-96c1-47b60b740d00", "0cc5b647-c1df-4637-891a-dec35c318583", "100"),
 )
 
 _GAMING_REG_SETTINGS = (
@@ -797,6 +799,30 @@ def ripristina_ottimizzazioni_registro_gaming() -> int:
     return ripristinati
 
 
+_ANTICHEAT_MAI_TOCCARE = {"vgc.exe", "vgtray.exe", "riotclientservices.exe"}
+
+
+def imposta_priorita_background_gaming(bassa: bool) -> list[str]:
+    """Abbassa a BELOW_NORMAL (o ripristina a NORMAL) la priorità CPU dei processi background in GAMING_THROTTLE_PROCESSES senza chiuderli."""
+    target = psutil.BELOW_NORMAL_PRIORITY_CLASS if bassa else psutil.NORMAL_PRIORITY_CLASS
+    esclusi = _PROCESSI_SISTEMA_PROTETTI | _ANTICHEAT_MAI_TOCCARE
+    modificati = set()
+    for p in psutil.process_iter(['name']):
+        try:
+            nome = p.info['name']
+            if not nome:
+                continue
+            nome_lower = nome.lower()
+            if nome_lower in esclusi:
+                continue
+            if nome_lower in GAMING_THROTTLE_PROCESSES:
+                p.nice(target)
+                modificati.add(nome)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            pass
+    return sorted(modificati)
+
+
 def imposta_priorita_processo_corrente(bassa: bool) -> bool:
     """Imposta la priorità del processo corrente su BELOW_NORMAL (Gaming Mode) o NORMAL (Balance)."""
     try:
@@ -844,6 +870,7 @@ def attiva_modalita_prestazioni() -> str:
 
     ottimizzazioni_reg = applica_ottimizzazioni_registro_gaming()
     imposta_priorita_processo_corrente(True)
+    throttled = imposta_priorita_background_gaming(True)
 
     bloccati = PROTECTED_PROCESSES | _PROCESSI_SISTEMA_PROTETTI
     ram_prima = psutil.virtual_memory().used
@@ -887,6 +914,8 @@ def attiva_modalita_prestazioni() -> str:
         f"Processi chiusi: {', '.join(sorted(chiusi)) if chiusi else 'Nessuno'} "
         f"| RAM liberata: {_formatta_ram_liberata(ram_liberata)}."
     )
+    if throttled:
+        righe.append(f"Priorità CPU ridotta (BELOW_NORMAL): {', '.join(throttled)}.")
     righe.append(
         f"Overhead PC Agent AI ridotto: telemetria Eco ({TELEMETRY_INTERVAL_GAMING}s), priorità BELOW_NORMAL."
     )
@@ -910,6 +939,7 @@ def ripristina_modalita_bilanciata() -> str:
     )
     ripristinati = ripristina_ottimizzazioni_registro_gaming()
     imposta_priorita_processo_corrente(False)
+    imposta_priorita_background_gaming(False)
 
     stato = _carica_gaming_state()
     stato.pop("prev_power_guid", None)
@@ -1036,11 +1066,23 @@ def abilita_hags() -> str:
         return f"Errore durante l'abilitazione di HAGS: {e}"
 
 
+def _leggi_physx_auto() -> bool | None:
+    """Verifica se PhysX NVIDIA è impostato su 'Selezione automatica' (NvCplPhysxAuto=1)."""
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\nvlddmkm\Global\NVTweak", 0, winreg.KEY_READ
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, "NvCplPhysxAuto")
+            return int(val) == 1
+    except Exception:
+        return None
+
+
 def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
     """Esegue un check-up rapido (sola lettura, zero UAC) segnalando solo eventuali colli di bottiglia reali."""
     avvisi = []
 
-    # 1. HAGS (Hardware-Accelerated GPU Scheduling) e VRR Windows
+    # 1. HAGS (Hardware-Accelerated GPU Scheduling), VRR Windows e PhysX NVIDIA
     hags = _leggi_hags_attivo()
     if hags is False:
         avvisi.append("HAGS non attivo: abilitalo in Impostazioni > Schermo > Grafica per ridurre la latenza GPU.")
@@ -1048,6 +1090,9 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
     vrr = _leggi_vrr_attivo()
     if vrr is False:
         avvisi.append("VRR (Frequenza di aggiornamento variabile) non attivo in Windows.")
+
+    if _leggi_physx_auto() is True:
+        avvisi.append("PhysX NVIDIA è su 'Selezione automatica': imposta la GPU NVIDIA nel Pannello di Controllo NVIDIA > Configura Surround, PhysX.")
 
     # 2. Rete (Wi-Fi / Offline / Ping alto)
     rete = info_rete_attiva()

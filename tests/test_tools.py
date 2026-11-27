@@ -213,8 +213,8 @@ def test_gaming_tuning_powercfg_and_dast():
     valid_guid = "11111111-1111-1111-1111-111111111111"
     with patch("subprocess.run", return_value=SimpleNamespace(returncode=0)) as mock_run:
         res = tools._ottimizza_piano_gaming(valid_guid)
-    assert res == ["USB Suspend OFF", "PCIe Power Mgmt OFF", "Disk Standby OFF"]
-    assert mock_run.call_count == 3
+    assert res == ["USB Suspend OFF", "PCIe Power Mgmt OFF", "Disk Standby OFF", "CPU Core Unpark 100%"]
+    assert mock_run.call_count == 4
 
     # DAST: GUID malformato o con metacaratteri shell bloccato
     with patch("subprocess.run") as mock_bad:
@@ -472,6 +472,7 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
     ram_ok = {"banchi": [{"gb": 8}, {"gb": 8}], "modalita_canale": "Dual Channel", "tipo": "DDR4", "frequenza_mhz": 3200}
     with patch("modules.tools._leggi_hags_attivo", return_value=True), \
          patch("modules.tools._leggi_vrr_attivo", return_value=True), \
+         patch("modules.tools._leggi_physx_auto", return_value=False), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
          patch("modules.tools.misura_ping", return_value={"ms": 14, "stato": "14 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=50.0, free=200 * 1024**3)), \
@@ -481,10 +482,11 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
     assert res_ok["ok"] is True
     assert "tutto OK" in res_ok["testo"]
 
-    # Caso con colli di bottiglia reali (HAGS off, VRR off, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
+    # Caso con colli di bottiglia reali (HAGS off, VRR off, PhysX Auto, Wi-Fi, ping alto, C: pieno, GPU/CPU calde, RAM Single Channel base)
     ram_slow = {"banchi": [{"gb": 8}], "modalita_canale": "Single Channel", "tipo": "DDR4", "frequenza_mhz": 2133}
     with patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch("modules.tools._leggi_vrr_attivo", return_value=False), \
+         patch("modules.tools._leggi_physx_auto", return_value=True), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Wi-Fi", "ip": "192.168.1.5", "link_mbps": 300}), \
          patch("modules.tools.misura_ping", return_value={"ms": 85, "stato": "85 ms"}), \
          patch("psutil.disk_usage", return_value=SimpleNamespace(percent=95.0, free=10 * 1024**3)), \
@@ -492,12 +494,35 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
          patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "80,5 °C"}):
         res_warn = tools.diagnostica_pre_partita(ram_slow)
     assert res_warn["ok"] is False
-    assert len(res_warn["avvisi"]) == 9
+    assert len(res_warn["avvisi"]) == 10
     assert "HAGS" in res_warn["testo"]
     assert "VRR" in res_warn["testo"]
+    assert "PhysX" in res_warn["testo"]
     assert "Wi-Fi" in res_warn["testo"]
     assert "Single Channel" in res_warn["testo"]
     assert "XMP/EXPO" in res_warn["testo"]
+
+
+def test_priorita_background_gaming_e_anticheat_intatto():
+    p_discord = MagicMock()
+    p_discord.info = {"name": "discord.exe"}
+    p_steam = MagicMock()
+    p_steam.info = {"name": "steamwebhelper.exe"}
+    p_vgc = MagicMock()
+    p_vgc.info = {"name": "vgc.exe"}
+
+    with patch("psutil.process_iter", return_value=[p_discord, p_steam, p_vgc]):
+        mod = tools.imposta_priorita_background_gaming(True)
+    assert mod == ["discord.exe", "steamwebhelper.exe"]
+    p_discord.nice.assert_called_once_with(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    p_steam.nice.assert_called_once_with(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    p_vgc.nice.assert_not_called()
+
+    with patch("psutil.process_iter", return_value=[p_discord, p_steam, p_vgc]):
+        restored = tools.imposta_priorita_background_gaming(False)
+    assert restored == ["discord.exe", "steamwebhelper.exe"]
+    p_discord.nice.assert_called_with(psutil.NORMAL_PRIORITY_CLASS)
+    p_vgc.nice.assert_not_called()
 
 
 def test_vrr_windows_parse_leggi_e_abilita():
