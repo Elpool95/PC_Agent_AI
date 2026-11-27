@@ -49,6 +49,12 @@ class GeminiAgent:
                 return "Operazione annullata dall'utente."
             return tools.pulisci_file_temporanei()
 
+        def blocca_lhm_da_lan() -> str:
+            """Crea una regola Windows Firewall per bloccare la porta 8085 di LHM dalla LAN previa conferma utente."""
+            if not self._richiedi_conferma("Creare una regola Windows Firewall (richiederà UAC) per bloccare l'accesso esterno alla porta 8085 di LibreHardwareMonitor?"):
+                return "Operazione annullata dall'utente."
+            return tools.blocca_lhm_da_lan()
+
         return [
             tools.analizza_sistema,
             tools.leggi_sensori_cpu,
@@ -60,12 +66,14 @@ class GeminiAgent:
             tools.misura_ping,
             tools.info_versioni_sistema,
             tools.piano_energetico_attivo,
+            tools.stato_sicurezza_lhm,
             tools.elenca_app_avvio,
             disabilita_app_avvio,
             termina_processo,
             attiva_modalita_prestazioni,
             tools.ripristina_modalita_bilanciata,
             pulisci_file_temporanei,
+            blocca_lhm_da_lan,
         ]
 
     def _costruisci_config(self):

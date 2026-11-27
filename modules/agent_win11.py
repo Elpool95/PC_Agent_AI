@@ -113,6 +113,14 @@ class PCAgentGUI:
             command=lambda: threading.Thread(target=self.azione_ram_locale, daemon=True).start()
         ).pack(side=tk.LEFT, padx=4)
 
+        self.btn_lhm_lock = tk.Button(
+            btn_frame, text="Lock LHM", bg="#2d2d30", fg="#ffffff",
+            activebackground="#3e3e42", activeforeground="#ffffff",
+            relief=tk.FLAT, padx=10, pady=5,
+            command=lambda: threading.Thread(target=self.azione_blocca_lhm_locale, daemon=True).start()
+        )
+        self.btn_lhm_lock.pack(side=tk.LEFT, padx=4)
+
         tk.Button(
             btn_frame, text="Clear", bg="#3a2626", fg="#ffffff",
             activebackground="#5a3434", activeforeground="#ffffff",
@@ -193,6 +201,23 @@ class PCAgentGUI:
         if self.agent.errore_init:
             err = self.agent.errore_init
             self.root.after(0, self.aggiungi_testo, "Sistema", f"Avviso Agent AI offline ({err}). La telemetria locale resta attiva.\n")
+
+        lhm_sec = tools.stato_sicurezza_lhm()
+        self.root.after(0, self._aggiorna_stato_lhm_btn, lhm_sec)
+        if lhm_sec["attivo"] and not lhm_sec["sicuro"]:
+            self.root.after(
+                0, self.aggiungi_testo, "Sistema",
+                "Avviso sicurezza: LibreHardwareMonitor (porta 8085) è esposto sulla LAN. "
+                "Clicca il pulsante 'Lock LHM' per proteggerlo via Windows Firewall.\n"
+            )
+
+    def _aggiorna_stato_lhm_btn(self, lhm_sec: dict):
+        if lhm_sec.get("sicuro"):
+            self.btn_lhm_lock.config(text="LHM Locked ●", bg="#2e7d32", activebackground="#388e3c")
+        elif lhm_sec.get("attivo"):
+            self.btn_lhm_lock.config(text="Lock LHM !", bg="#8c5a00", activebackground="#a86d00")
+        else:
+            self.btn_lhm_lock.config(text="Lock LHM", bg="#2d2d30", activebackground="#3e3e42")
 
     def _chiedi_conferma_utente(self, messaggio: str) -> bool:
         """Mostra un popup nativo sul thread GUI per confermare azioni sensibili richieste dall'AI."""
@@ -429,6 +454,18 @@ class PCAgentGUI:
             )
         righe.append("")
         self.root.after(0, self.aggiungi_testo, "Sistema", "\n".join(righe))
+
+    def azione_blocca_lhm_locale(self):
+        if not self._chiedi_conferma_utente(
+            "Creare una regola Windows Firewall (richiederà UAC) per bloccare l'accesso esterno (LAN) "
+            "alla porta 8085 di LibreHardwareMonitor?\n\nPC Agent AI continuerà a funzionare normalmente su localhost."
+        ):
+            self.root.after(0, self.aggiungi_testo, "Sistema", "Operazione annullata.\n")
+            return
+        res = tools.blocca_lhm_da_lan()
+        lhm_sec = tools.stato_sicurezza_lhm()
+        self.root.after(0, self._aggiorna_stato_lhm_btn, lhm_sec)
+        self.root.after(0, self.aggiungi_testo, "Sistema", f"{res}\n")
 
     # --- CHAT AI ---
 

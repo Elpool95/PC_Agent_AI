@@ -1,3 +1,4 @@
+import ctypes
 import json
 import os
 import re
@@ -639,3 +640,61 @@ def pulisci_file_temporanei() -> str:
         except Exception:
             pass
     return f"Pulizia completata: rimossi {rimossi} elementi temporanei."
+
+_REGOLA_FIREWALL_LHM = "PC_Agent_AI_Block_LHM_8085"
+
+def stato_sicurezza_lhm() -> dict:
+    """Verifica se LibreHardwareMonitor (porta 8085) è esposto sulla LAN e se esiste la regola Firewall di blocco."""
+    listen_addrs = []
+    try:
+        for conn in psutil.net_connections(kind="tcp"):
+            if conn.laddr and conn.laddr.port == 8085 and conn.status == psutil.CONN_LISTEN:
+                listen_addrs.append(conn.laddr.ip)
+    except Exception:
+        try:
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-NetTCPConnection -LocalPort 8085 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalAddress"],
+                encoding="utf-8", errors="ignore", stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
+            )
+            listen_addrs = [r.strip() for r in out.splitlines() if r.strip()]
+        except Exception:
+            pass
+
+    esposto_lan = any(ip in ("0.0.0.0", "::", "") for ip in listen_addrs)
+    protetto_fw = False
+    try:
+        res = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", f"name={_REGOLA_FIREWALL_LHM}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, creationflags=NO_WINDOW
+        )
+        protetto_fw = res.returncode == 0
+    except Exception:
+        pass
+
+    return {
+        "attivo": bool(listen_addrs),
+        "esposto_lan": esposto_lan,
+        "protetto_firewall": protetto_fw,
+        "sicuro": (not esposto_lan) or protetto_fw,
+    }
+
+def blocca_lhm_da_lan() -> str:
+    """Crea una regola Windows Firewall (richiede UAC) per bloccare l'accesso LAN alla porta 8085 di LHM mantenendo attivo localhost."""
+    stato = stato_sicurezza_lhm()
+    if stato["protetto_firewall"]:
+        return f"La porta 8085 è già protetta dalla regola Windows Firewall '{_REGOLA_FIREWALL_LHM}'."
+    parametri = (
+        f'advfirewall firewall add rule name="{_REGOLA_FIREWALL_LHM}" '
+        "dir=in action=block protocol=TCP localport=8085"
+    )
+    try:
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "netsh.exe", parametri, None, 0)
+        if ret > 32:
+            return (
+                f"Richiesta UAC confermata: regola Windows Firewall '{_REGOLA_FIREWALL_LHM}' aggiunta. "
+                "La porta 8085 è ora bloccata dalla LAN e resta accessibile solo su localhost."
+            )
+        return "Operazione annullata dall'utente nella finestra UAC di Windows."
+    except Exception as e:
+        return f"Errore durante la creazione della regola Firewall: {e}"

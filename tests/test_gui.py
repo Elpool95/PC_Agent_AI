@@ -34,7 +34,7 @@ def test_gui_usability_labels_and_bottom_anchor(gui_app):
             collect_buttons(child)
     collect_buttons(root)
 
-    expected = {"Top Process", "Storage", "Gaming Mode", "Balance", "Start App", "RAM Detail", "Clear", "Send"}
+    expected = {"Top Process", "Storage", "Gaming Mode", "Balance", "Start App", "RAM Detail", "Lock LHM", "Clear", "Send"}
     assert expected.issubset(set(buttons))
     assert app.lbl_footer.master.pack_info()["side"] == "bottom"
     assert app.entry.master.pack_info()["side"] == "bottom"
@@ -92,12 +92,14 @@ def test_gui_carica_info_hw_and_chiama_gemini(gui_app):
              "banchi": [{"slot_breve": "ChA-0", "gb": 8, "frequenza_mhz": 2133, "voltaggio": "1.20V", "part_number": "CMK"}],
              "frequenza_mhz": 2133, "tipo": "DDR4", "modalita_canale": "Dual Channel", "totale_gb": 8
          }), \
-         patch("modules.agent_win11.GeminiAgent", return_value=mock_agent):
+         patch("modules.agent_win11.GeminiAgent", return_value=mock_agent), \
+         patch("modules.tools.stato_sicurezza_lhm", return_value={"attivo": True, "sicuro": False}):
         app._carica_info_hw()
         root.update()
 
     assert "Win11" in app.lbl_footer.cget("text")
     assert "ChA-0" in app.lbl_ram_banchi.cget("text")
+    assert "porta 8085" in app.chat_area.get("1.0", tk.END)
 
     app._chiama_gemini("domanda")
     root.update()
@@ -208,3 +210,25 @@ def test_gui_chiedi_conferma_utente(gui_app):
         m_yes.assert_called_once()
     with patch("modules.agent_win11.messagebox.askyesno", return_value=False):
         assert app._chiedi_conferma_utente("Confermi?") is False
+
+
+def test_gui_lock_lhm_button_and_action(gui_app):
+    app, root, _ = gui_app
+    app._aggiorna_stato_lhm_btn({"attivo": True, "sicuro": False})
+    assert app.btn_lhm_lock.cget("text") == "Lock LHM !"
+
+    app._aggiorna_stato_lhm_btn({"attivo": True, "sicuro": True})
+    assert "Locked" in app.btn_lhm_lock.cget("text")
+
+    with patch.object(app, "_chiedi_conferma_utente", return_value=False):
+        app.azione_blocca_lhm_locale()
+        root.update()
+        assert "annullata" in app.chat_area.get("1.0", tk.END).lower()
+
+    with patch.object(app, "_chiedi_conferma_utente", return_value=True), \
+         patch("modules.tools.blocca_lhm_da_lan", return_value="Regola creata OK"), \
+         patch("modules.tools.stato_sicurezza_lhm", return_value={"attivo": True, "sicuro": True}):
+        app.azione_blocca_lhm_locale()
+        root.update()
+        assert "Regola creata OK" in app.chat_area.get("1.0", tk.END)
+        assert "Locked" in app.btn_lhm_lock.cget("text")

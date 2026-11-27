@@ -273,3 +273,38 @@ def test_maschera_percorso_utente():
     assert mascherato.startswith("%USERPROFILE%")
     assert home.lower() not in mascherato.lower()
     assert tools.maschera_percorso_utente("") == ""
+
+
+def test_stato_sicurezza_lhm_e_blocco_lan():
+    conn_lan = SimpleNamespace(laddr=SimpleNamespace(ip="::", port=8085), status=psutil.CONN_LISTEN)
+    conn_local = SimpleNamespace(laddr=SimpleNamespace(ip="127.0.0.1", port=8085), status=psutil.CONN_LISTEN)
+
+    # Esposto su LAN senza regola firewall
+    with patch("psutil.net_connections", return_value=[conn_lan]), \
+         patch("subprocess.run", return_value=SimpleNamespace(returncode=1)):
+        st = tools.stato_sicurezza_lhm()
+    assert st == {"attivo": True, "esposto_lan": True, "protetto_firewall": False, "sicuro": False}
+
+    # Esposto su LAN ma protetto da regola firewall
+    with patch("psutil.net_connections", return_value=[conn_lan]), \
+         patch("subprocess.run", return_value=SimpleNamespace(returncode=0)):
+        st_ok = tools.stato_sicurezza_lhm()
+    assert st_ok["sicuro"] is True and st_ok["protetto_firewall"] is True
+
+    # Solo localhost -> sicuro anche senza regola firewall
+    with patch("psutil.net_connections", return_value=[conn_local]), \
+         patch("subprocess.run", return_value=SimpleNamespace(returncode=1)):
+        st_loc = tools.stato_sicurezza_lhm()
+    assert st_loc["sicuro"] is True and st_loc["esposto_lan"] is False
+
+    # Blocco LAN: già protetto
+    with patch("modules.tools.stato_sicurezza_lhm", return_value={"protetto_firewall": True}):
+        assert "già protetta" in tools.blocca_lhm_da_lan()
+
+    # Blocco LAN: UAC accettato (> 32) e annullato (<= 32)
+    with patch("modules.tools.stato_sicurezza_lhm", return_value={"protetto_firewall": False}), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=42):
+        assert "aggiunta" in tools.blocca_lhm_da_lan()
+    with patch("modules.tools.stato_sicurezza_lhm", return_value={"protetto_firewall": False}), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=5):
+        assert "annullata" in tools.blocca_lhm_da_lan().lower()

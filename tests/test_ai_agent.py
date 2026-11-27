@@ -86,27 +86,33 @@ def test_gemini_agent_hitl_confirmation_blocks_and_allows():
         with patch("modules.tools.termina_processo") as m_kill, \
              patch("modules.tools.disabilita_app_avvio") as m_dis, \
              patch("modules.tools.attiva_modalita_prestazioni") as m_perf, \
-             patch("modules.tools.pulisci_file_temporanei") as m_temp:
+             patch("modules.tools.pulisci_file_temporanei") as m_temp, \
+             patch("modules.tools.blocca_lhm_da_lan") as m_lhm:
             assert "annullata" in tools_map["termina_processo"]("notepad.exe").lower()
             assert "annullata" in tools_map["disabilita_app_avvio"]("SomeApp").lower()
             assert "annullata" in tools_map["attiva_modalita_prestazioni"]().lower()
             assert "annullata" in tools_map["pulisci_file_temporanei"]().lower()
+            assert "annullata" in tools_map["blocca_lhm_da_lan"]().lower()
             m_kill.assert_not_called()
             m_dis.assert_not_called()
             m_perf.assert_not_called()
             m_temp.assert_not_called()
+            m_lhm.assert_not_called()
 
         ag_allow = GeminiAgent(confirm_callback=lambda msg: True)
         tools_allow = {getattr(fn, "__name__", ""): fn for fn in ag_allow._config_chat.tools}
         with patch("modules.tools.termina_processo", return_value="OK_KILL") as m_kill2, \
              patch("modules.tools.disabilita_app_avvio", return_value="OK_DIS") as m_dis2, \
              patch("modules.tools.attiva_modalita_prestazioni", return_value="OK_PERF") as m_perf2, \
-             patch("modules.tools.pulisci_file_temporanei", return_value="OK_TEMP") as m_temp2:
+             patch("modules.tools.pulisci_file_temporanei", return_value="OK_TEMP") as m_temp2, \
+             patch("modules.tools.blocca_lhm_da_lan", return_value="OK_LHM") as m_lhm2:
             assert tools_allow["termina_processo"]("notepad.exe") == "OK_KILL"
             assert tools_allow["disabilita_app_avvio"]("SomeApp") == "OK_DIS"
             assert tools_allow["attiva_modalita_prestazioni"]() == "OK_PERF"
             assert tools_allow["pulisci_file_temporanei"]() == "OK_TEMP"
+            assert tools_allow["blocca_lhm_da_lan"]() == "OK_LHM"
             m_kill2.assert_called_once_with("notepad.exe")
             m_dis2.assert_called_once_with("SomeApp")
             m_perf2.assert_called_once()
             m_temp2.assert_called_once()
+            m_lhm2.assert_called_once()
