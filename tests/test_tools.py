@@ -677,3 +677,19 @@ def test_stato_ottimizzazioni_gaming():
     assert "DLDSR: OFF ○" in st_off["testo_barra"]
     assert "PhysX: Auto ○" in st_off["testo_barra"]
     assert st_off["colore"] == "#9e9e9e"
+
+
+def test_leggi_physx_auto_dch_priority():
+    mock_key = MagicMock()
+    mock_key.__enter__.return_value = mock_key
+
+    # Driver DCH moderno (Parameters\Global\NVTweak) = 0 -> GPU dedicata (False)
+    with patch("winreg.OpenKey", return_value=mock_key) as mock_open, \
+         patch("winreg.QueryValueEx", return_value=(0, 4)):
+        assert tools._leggi_physx_auto() is False
+    assert r"Parameters\Global\NVTweak" in mock_open.call_args_list[0].args[1]
+
+    # Fallback a percorso legacy se DCH non esiste
+    with patch("winreg.OpenKey", side_effect=[FileNotFoundError(), mock_key]), \
+         patch("winreg.QueryValueEx", return_value=(1, 4)):
+        assert tools._leggi_physx_auto() is True

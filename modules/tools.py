@@ -1395,15 +1395,21 @@ def abilita_hags() -> str:
 
 
 def _leggi_physx_auto() -> bool | None:
-    """Verifica se PhysX NVIDIA è impostato su 'Selezione automatica' (NvCplPhysxAuto=1)."""
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\nvlddmkm\Global\NVTweak", 0, winreg.KEY_READ
-        ) as key:
-            val, _ = winreg.QueryValueEx(key, "NvCplPhysxAuto")
-            return int(val) == 1
-    except Exception:
-        return None
+    """Verifica se PhysX NVIDIA è impostato su 'Selezione automatica' (NvCplPhysxAuto=1), controllando prima il percorso DCH."""
+    percorsi = (
+        r"SYSTEM\CurrentControlSet\Services\nvlddmkm\Parameters\Global\NVTweak",
+        r"SYSTEM\CurrentControlSet\Services\nvlddmkm\Global\NVTweak",
+    )
+    for subpath in percorsi:
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subpath, 0, winreg.KEY_READ) as key:
+                val, _ = winreg.QueryValueEx(key, "NvCplPhysxAuto")
+                return int(val) == 1
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+    return None
 
 
 def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
