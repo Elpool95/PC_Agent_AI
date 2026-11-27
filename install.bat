@@ -53,7 +53,7 @@ if not exist ".env" (
 )
 
 echo [4/4] Creazione collegamento sul Desktop...
-powershell -NoProfile -Command "$s = New-Object -ComObject WScript.Shell; $lnk = $s.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\PC Agent AI.lnk'); $lnk.TargetPath = '%~dp0avvia_agent.bat'; $lnk.WorkingDirectory = '%~dp0'; $lnk.WindowStyle = 7; $lnk.Description = 'PC Agent AI - Monitor & Optimizer'; if (Test-Path '%~dp0icon.ico') { $lnk.IconLocation = '%~dp0icon.ico' } else { $lnk.IconLocation = \"$env:SystemRoot\System32\imageres.dll,109\" }; $lnk.Save()"
+powershell -NoProfile -Command "$s = New-Object -ComObject WScript.Shell; $lnk = $s.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\PC Agent AI.lnk'); $lnk.TargetPath = '%~dp0avvia_agent.bat'; $lnk.WorkingDirectory = '%~dp0'; $lnk.WindowStyle = 7; $lnk.Description = 'PC Agent AI - Monitor & Optimizer'; if (Test-Path '%~dp0icon.ico') { $lnk.IconLocation = '%~dp0icon.ico' } else { $lnk.IconLocation = $env:SystemRoot + '\System32\imageres.dll,109' }; $lnk.Save()"
 if %errorlevel%==0 (
     echo Collegamento "PC Agent AI" creato sul Desktop!
 ) else (
