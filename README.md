@@ -41,7 +41,7 @@ Assistente desktop per **Windows 10/11** con telemetria hardware in tempo reale,
    - Crea un ambiente virtuale isolato (`.venv`)
    - Installa le dipendenze da `requirements.txt`
    - Crea il file `.env` da `.env.example`
-   - Chiede se creare un collegamento sul Desktop
+   - Crea automaticamente l'icona di avvio **"PC Agent AI"** sul Desktop
 3. Apri il file `.env` e inserisci la tua API Key:
    ```env
    GEMINI_API_KEY=la_tua_chiave_api

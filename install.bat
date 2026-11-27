@@ -52,11 +52,12 @@ if not exist ".env" (
     )
 )
 
-echo [4/4] Vuoi creare un collegamento sul Desktop per avviare PC Agent AI? (S/N)
-set /p "CREA_LNK=Scelta [S/N]: "
-if /I "%CREA_LNK%"=="S" (
-    powershell -NoProfile -Command "$s = New-Object -ComObject WScript.Shell; $lnk = $s.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\PC Agent AI.lnk'); $lnk.TargetPath = '%~dp0avvia_agent.bat'; $lnk.WorkingDirectory = '%~dp0'; $lnk.Save()"
+echo [4/4] Creazione collegamento sul Desktop...
+powershell -NoProfile -Command "$s = New-Object -ComObject WScript.Shell; $lnk = $s.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\PC Agent AI.lnk'); $lnk.TargetPath = '%~dp0avvia_agent.bat'; $lnk.WorkingDirectory = '%~dp0'; $lnk.WindowStyle = 7; $lnk.Description = 'PC Agent AI - Monitor & Optimizer'; if (Test-Path '%~dp0icon.ico') { $lnk.IconLocation = '%~dp0icon.ico' } else { $lnk.IconLocation = \"$env:SystemRoot\System32\imageres.dll,109\" }; $lnk.Save()"
+if %errorlevel%==0 (
     echo Collegamento "PC Agent AI" creato sul Desktop!
+) else (
+    echo [AVVISO] Impossibile creare automaticamente il collegamento sul Desktop.
 )
 
 echo.
