@@ -947,6 +947,26 @@ def _leggi_hags_attivo() -> bool | None:
         return None
 
 
+def abilita_hags() -> str:
+    """Abilita HAGS (HwSchMode=2 in HKLM) tramite reg.exe con conferma UAC. Richiede riavvio di Windows."""
+    if _leggi_hags_attivo() is True:
+        return "HAGS (Hardware-Accelerated GPU Scheduling) è già attivo."
+    parametri = (
+        r'add "HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers" '
+        r'/v HwSchMode /t REG_DWORD /d 2 /f'
+    )
+    try:
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "reg.exe", parametri, None, 0)
+        if ret > 32:
+            return (
+                "HAGS abilitato nel registro di Windows (UAC confermato). "
+                "Riavvia il PC per rendere effettiva la modifica."
+            )
+        return "Abilitazione HAGS annullata dall'utente nella finestra UAC."
+    except Exception as e:
+        return f"Errore durante l'abilitazione di HAGS: {e}"
+
+
 def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
     """Esegue un check-up rapido (sola lettura, zero UAC) segnalando solo eventuali colli di bottiglia reali."""
     avvisi = []

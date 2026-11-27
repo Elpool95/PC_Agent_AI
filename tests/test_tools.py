@@ -486,3 +486,19 @@ def test_diagnostica_pre_partita_ok_e_avvisi():
     assert "Wi-Fi" in res_warn["testo"]
     assert "Single Channel" in res_warn["testo"]
     assert "XMP/EXPO" in res_warn["testo"]
+
+
+def test_abilita_hags():
+    with patch("modules.tools._leggi_hags_attivo", return_value=True):
+        assert "già attivo" in tools.abilita_hags()
+
+    with patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=42) as mock_uac:
+        res_ok = tools.abilita_hags()
+    assert "abilitato" in res_ok.lower()
+    assert "riavvia" in res_ok.lower()
+    mock_uac.assert_called_once()
+
+    with patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch("ctypes.windll.shell32.ShellExecuteW", return_value=5):
+        assert "annullata" in tools.abilita_hags().lower()

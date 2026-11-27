@@ -442,6 +442,13 @@ class PCAgentGUI:
             res_svc = tools.pausa_servizi_gaming(attivi)
             self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_svc}\n")
 
+        if tools._leggi_hags_attivo() is False and self._chiedi_conferma_utente(
+            "HAGS (Pianificazione GPU con accelerazione hardware) è attualmente spento.\n\n"
+            "Vuoi abilitarlo automaticamente ora (richiederà conferma UAC e un riavvio del PC)?"
+        ):
+            res_hags = tools.abilita_hags()
+            self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_hags}\n")
+
     def azione_bilanciato_locale(self):
         res = tools.ripristina_modalita_bilanciata()
         res_svc = tools.riavvia_servizi_gaming() if tools.ha_servizi_gaming_in_pausa() else ""

@@ -196,14 +196,17 @@ def test_gui_local_actions_and_chat_flow(gui_app):
          patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"), \
          patch("modules.tools.diagnostica_pre_partita", return_value={"ok": True, "avvisi": [], "testo": "Check-up OK"}), \
          patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
+         patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch.object(app, "_chiedi_conferma_utente", return_value=True), \
-         patch("modules.tools.pausa_servizi_gaming", return_value="Servizi in pausa OK"):
+         patch("modules.tools.pausa_servizi_gaming", return_value="Servizi in pausa OK"), \
+         patch("modules.tools.abilita_hags", return_value="HAGS abilitato OK"):
         app.azione_gaming_locale()
         root.update()
         txt = app.chat_area.get("1.0", tk.END)
         assert "Perf OK" in txt
         assert "Check-up OK" in txt
         assert "Servizi in pausa OK" in txt
+        assert "HAGS abilitato OK" in txt
 
     with patch("modules.tools.ripristina_modalita_bilanciata", return_value="Bil OK"), \
          patch("modules.tools.ha_servizi_gaming_in_pausa", return_value=True), \
