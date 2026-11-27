@@ -32,34 +32,95 @@ def _trova_nvidia_smi() -> str:
             return c
     return "nvidia-smi"
 
-def analizza_sistema() -> dict:
-    """Legge l'utilizzo attuale di CPU, RAM, i 5 processi più pesanti sulla CPU e i 5 più pesanti sulla RAM."""
-    cpu = psutil.cpu_percent(interval=1)
-    ram = psutil.virtual_memory()
-    processi = []
-    for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info']):
+def analizza_sistema(limite: int = 10) -> dict:
+    """Campiona l'utilizzo reale di CPU, RAM, i Top N processi CPU/RAM (con processo padre) e il riepilogo aggregato per app."""
+    limite = max(1, min(int(limite), 25))
+    n_logici = psutil.cpu_count(logical=True) or 1
+
+    # Passo 1: priming dei contatori CPU per processo (la 1a lettura di psutil è sempre 0.0%)
+    snapshot_procs = []
+    for p in psutil.process_iter(['pid', 'ppid', 'name', 'cpu_percent', 'memory_info']):
         try:
-            nome = p.info['name']
-            if nome and nome != 'System Idle Process':
-                mem = p.info.get('memory_info')
-                ram_mb = round(mem.rss / (1024 * 1024), 1) if mem else 0.0
-                processi.append({
-                    'pid': p.info['pid'],
-                    'name': nome,
-                    'cpu_percent': p.info['cpu_percent'] or 0.0,
-                    'ram_mb': ram_mb
-                })
+            nome = p.info.get('name')
+            if not nome or nome == 'System Idle Process':
+                continue
+            if callable(getattr(p, "cpu_percent", None)):
+                p.cpu_percent(interval=None)
+            snapshot_procs.append(p)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-    top_cpu = sorted(processi, key=lambda x: x['cpu_percent'], reverse=True)[:5]
-    top_ram = sorted(processi, key=lambda x: x['ram_mb'], reverse=True)[:5]
+
+    # Passo 2: finestra di campionamento condivisa (0.8s) per CPU globale e delta per-processo
+    cpu = psutil.cpu_percent(interval=0.8)
+    ram = psutil.virtual_memory()
+
+    # Mappa PID -> nome per risolvere velocemente il processo padre senza chiamate extra
+    pid_to_name = {}
+    for p in snapshot_procs:
+        pid_val = p.info.get('pid')
+        if pid_val is not None:
+            pid_to_name[pid_val] = p.info.get('name') or ""
+
+    processi = []
+    per_app = {}
+    for p in snapshot_procs:
+        try:
+            nome = p.info.get('name')
+            if not nome or nome == 'System Idle Process':
+                continue
+            if callable(getattr(p, "cpu_percent", None)):
+                raw_cpu = p.cpu_percent(interval=None)
+                cpu_norm = round(min(raw_cpu / n_logici, 100.0), 1)
+            else:
+                cpu_norm = round(float(p.info.get('cpu_percent') or 0.0), 1)
+
+            mem = None
+            if callable(getattr(p, "memory_info", None)):
+                try:
+                    mem = p.memory_info()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    mem = p.info.get('memory_info')
+            else:
+                mem = p.info.get('memory_info')
+            ram_mb = round(mem.rss / (1024 * 1024), 1) if mem else 0.0
+
+            ppid = p.info.get('ppid')
+            parent_name = pid_to_name.get(ppid, "") if ppid else ""
+            if not parent_name and ppid and ppid > 0:
+                try:
+                    parent_name = psutil.Process(ppid).name()
+                except Exception:
+                    parent_name = f"PID {ppid}"
+            parent_label = f"{parent_name} ({ppid})" if (parent_name and ppid and not parent_name.startswith("PID ")) else (parent_name or "Sistema")
+
+            item = {
+                'pid': p.info['pid'],
+                'ppid': ppid,
+                'name': nome,
+                'parent': parent_label,
+                'cpu_percent': cpu_norm,
+                'ram_mb': ram_mb,
+            }
+            processi.append(item)
+
+            agg = per_app.setdefault(nome, {'name': nome, 'istanze': 0, 'cpu_percent': 0.0, 'ram_mb': 0.0})
+            agg['istanze'] += 1
+            agg['cpu_percent'] = round(agg['cpu_percent'] + cpu_norm, 1)
+            agg['ram_mb'] = round(agg['ram_mb'] + ram_mb, 1)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    top_cpu = sorted(processi, key=lambda x: (x['cpu_percent'], x['ram_mb']), reverse=True)[:limite]
+    top_ram = sorted(processi, key=lambda x: x['ram_mb'], reverse=True)[:limite]
+    top_app_ram = sorted(per_app.values(), key=lambda x: x['ram_mb'], reverse=True)[:5]
     return {
         "cpu_percent": cpu,
         "ram_percent": ram.percent,
         "ram_usata_gb": round(ram.used / (1024**3), 2),
         "ram_totale_gb": round(ram.total / (1024**3), 2),
         "top_processi_cpu": top_cpu,
-        "top_processi_ram": top_ram
+        "top_processi_ram": top_ram,
+        "top_app_ram": top_app_ram,
     }
 
 def monitora_gpu() -> dict:

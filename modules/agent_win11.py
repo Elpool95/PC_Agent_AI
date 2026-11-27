@@ -449,11 +449,30 @@ class PCAgentGUI:
     # --- AZIONI LOCALI ---
 
     def azione_stato_locale(self):
-        sys_info = tools.analizza_sistema()
-        top_cpu = "\n".join([f"  - {p['name']} (PID {p['pid']}): {p['cpu_percent']}%" for p in sys_info['top_processi_cpu']])
-        top_ram = "\n".join([f"  - {p['name']} (PID {p['pid']}): {p['ram_mb']} MB" for p in sys_info['top_processi_ram']])
-        testo = f"Top 5 processi CPU:\n{top_cpu}\nTop 5 processi RAM:\n{top_ram}\n"
-        self.root.after(0, self.aggiungi_testo, "Sistema", testo)
+        sys_info = tools.analizza_sistema(limite=10)
+        righe = [
+            f"Stato istantaneo — CPU: {sys_info.get('cpu_percent', 0)}% | "
+            f"RAM: {sys_info.get('ram_usata_gb', 0)}/{sys_info.get('ram_totale_gb', 0)} GB ({sys_info.get('ram_percent', 0)}%)",
+            f"Top {len(sys_info['top_processi_cpu'])} processi CPU (con processo padre):"
+        ]
+        for p in sys_info['top_processi_cpu']:
+            padre = f"  ← {p['parent']}" if p.get('parent') else ""
+            ram_s = f" | {p['ram_mb']} MB" if 'ram_mb' in p else ""
+            righe.append(f"  - {p['name']} (PID {p['pid']}): {p['cpu_percent']}%{ram_s}{padre}")
+
+        righe.append(f"Top {len(sys_info['top_processi_ram'])} processi RAM (con processo padre):")
+        for p in sys_info['top_processi_ram']:
+            padre = f"  ← {p['parent']}" if p.get('parent') else ""
+            cpu_s = f" | CPU {p['cpu_percent']}%" if 'cpu_percent' in p else ""
+            righe.append(f"  - {p['name']} (PID {p['pid']}): {p['ram_mb']} MB{cpu_s}{padre}")
+
+        if sys_info.get('top_app_ram'):
+            righe.append("Totale aggregato per applicazione (Top 5 RAM):")
+            for a in sys_info['top_app_ram']:
+                righe.append(f"  - {a['name']} ({a['istanze']} proc.): {a['ram_mb']} MB | CPU {a['cpu_percent']}%")
+
+        righe.append("")
+        self.root.after(0, self.aggiungi_testo, "Sistema", "\n".join(righe))
 
     def azione_dischi_locale(self):
         dischi = tools.monitora_archiviazione()

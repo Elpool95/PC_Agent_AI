@@ -193,12 +193,17 @@ def test_gui_local_actions_and_chat_flow(gui_app):
     app, root, _ = gui_app
 
     with patch("modules.tools.analizza_sistema", return_value={
-        "top_processi_cpu": [{"name": "a.exe", "pid": 1, "cpu_percent": 10.0}],
-        "top_processi_ram": [{"name": "b.exe", "pid": 2, "ram_mb": 200.0}],
+        "cpu_percent": 18.5, "ram_usata_gb": 8.0, "ram_totale_gb": 24.0, "ram_percent": 33.3,
+        "top_processi_cpu": [{"name": "a.exe", "pid": 1, "cpu_percent": 10.0, "ram_mb": 50.0, "parent": "explorer.exe (500)"}],
+        "top_processi_ram": [{"name": "b.exe", "pid": 2, "ram_mb": 200.0, "cpu_percent": 2.0, "parent": "services.exe (400)"}],
+        "top_app_ram": [{"name": "b.exe", "istanze": 3, "ram_mb": 450.0, "cpu_percent": 4.5}],
     }):
         app.azione_stato_locale()
         root.update()
-        assert "Top 5 processi RAM" in app.chat_area.get("1.0", tk.END)
+        txt_proc = app.chat_area.get("1.0", tk.END)
+        assert "processi RAM" in txt_proc
+        assert "explorer.exe (500)" in txt_proc
+        assert "Totale aggregato per applicazione" in txt_proc
 
     with patch("modules.tools.monitora_archiviazione", return_value=[{"unita": "C:\\", "usati_gb": 200, "totali_gb": 220, "percent": 91.0, "liberi_gb": 20}]), \
          patch("modules.tools.stato_salute_dischi", return_value={"C": {"modello": "Samsung 850 EVO", "tipo": "SSD", "bus": "SATA", "etichetta": "Good 89%", "temperatura_c": "41°C", "power_on_hours": 29000, "data_written_gb": 44870.0}}), \

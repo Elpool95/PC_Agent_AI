@@ -31,9 +31,9 @@ def test_trova_nvidia_smi():
 
 
 def test_analizza_sistema():
-    p1 = SimpleNamespace(info={"pid": 10, "name": "appA.exe", "cpu_percent": 25.0, "memory_info": SimpleNamespace(rss=500 * 1024 * 1024)})
-    p2 = SimpleNamespace(info={"pid": 20, "name": "appB.exe", "cpu_percent": 5.0, "memory_info": SimpleNamespace(rss=900 * 1024 * 1024)})
-    p3 = SimpleNamespace(info={"pid": 0, "name": "System Idle Process", "cpu_percent": 90.0, "memory_info": None})
+    p1 = SimpleNamespace(info={"pid": 10, "ppid": 4, "name": "appA.exe", "cpu_percent": 25.0, "memory_info": SimpleNamespace(rss=500 * 1024 * 1024)})
+    p2 = SimpleNamespace(info={"pid": 20, "ppid": 10, "name": "appB.exe", "cpu_percent": 5.0, "memory_info": SimpleNamespace(rss=900 * 1024 * 1024)})
+    p3 = SimpleNamespace(info={"pid": 0, "ppid": 0, "name": "System Idle Process", "cpu_percent": 90.0, "memory_info": None})
     fake_ram = SimpleNamespace(percent=42.0, used=10 * 1024**3, total=24 * 1024**3)
     with patch("psutil.cpu_percent", return_value=15.0), \
          patch("psutil.virtual_memory", return_value=fake_ram), \
@@ -43,6 +43,9 @@ def test_analizza_sistema():
     assert res["top_processi_cpu"][0]["name"] == "appA.exe"
     assert res["top_processi_ram"][0]["name"] == "appB.exe"
     assert res["top_processi_ram"][0]["ram_mb"] == 900.0
+    assert "appA.exe (10)" in res["top_processi_ram"][0]["parent"]
+    assert res["top_app_ram"][0]["name"] == "appB.exe"
+    assert res["top_app_ram"][0]["istanze"] == 1
 
 
 def test_monitora_gpu_success_and_error():
