@@ -12,7 +12,7 @@ import psutil
 from config.settings import (
     SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW,
     DISK_CRIT, GPU_TEMP_WARN, GAMING_PAUSABLE_SERVICES,
-    GAMING_STATE_FILE,
+    GAMING_STATE_FILE, TELEMETRY_INTERVAL_NORMAL, TELEMETRY_INTERVAL_GAMING,
 )
 
 def _trova_nvidia_smi() -> str:
@@ -818,7 +818,9 @@ def attiva_modalita_prestazioni() -> str:
         f"Processi chiusi: {', '.join(sorted(chiusi)) if chiusi else 'Nessuno'} "
         f"| RAM liberata: {_formatta_ram_liberata(ram_liberata)}."
     )
-    righe.append("Overhead PC Agent AI ridotto: telemetria Eco (10s), ping in pausa, priorità BELOW_NORMAL.")
+    righe.append(
+        f"Overhead PC Agent AI ridotto: telemetria Eco ({TELEMETRY_INTERVAL_GAMING}s), priorità BELOW_NORMAL."
+    )
     return "\n".join(righe)
 
 
@@ -846,7 +848,7 @@ def ripristina_modalita_bilanciata() -> str:
     _salva_gaming_state(stato)
 
     extra_reg = f" Ripristinate {ripristinati} impostazioni Windows (notifiche/GameBar)." if ripristinati else ""
-    return f"Piano energetico riportato su '{target_nome}'.{extra_reg} Telemetria standard (2s) e priorità normale ripristinate."
+    return f"Piano energetico riportato su '{target_nome}'.{extra_reg} Telemetria standard ({TELEMETRY_INTERVAL_NORMAL}s) e priorità normale ripristinate."
 
 
 _SERVIZI_IN_PAUSA: list[str] = []

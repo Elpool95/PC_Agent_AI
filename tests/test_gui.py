@@ -70,15 +70,13 @@ def test_gui_mode_toggle_and_clear_console(gui_app):
         app._imposta_stato_modalita("gaming")
         assert "●" in app.btn_gaming.cget("text")
         assert app.btn_bilanciato.cget("text") == "Balance"
-        assert app._telemetry_interval == 10
-        assert app._ping_paused is True
+        assert app._telemetry_interval == 2.5
         mock_prio.assert_called_with(True)
 
         app._imposta_stato_modalita("bilanciato")
         assert "●" in app.btn_bilanciato.cget("text")
         assert app.btn_gaming.cget("text") == "Gaming Mode"
-        assert app._telemetry_interval == 2
-        assert app._ping_paused is False
+        assert app._telemetry_interval == 1
         mock_prio.assert_called_with(False)
 
     app.aggiungi_testo("Tu", "messaggio di prova")
@@ -155,9 +153,9 @@ def test_gui_loop_telemetria_single_tick(gui_app):
     assert "Ping: 12 ms" in app.lbl_net.cget("text")
     assert app.disk_labels["C"].cget("fg") == "#ff5252"
 
-    # Verifica pausa ping in Gaming Mode (Eco Telemetry)
+    # Verifica che il ping resti attivo anche in Gaming Mode (intervallo 2.5s)
     wait_calls["n"] = 0
-    app._ping_paused = True
+    app._telemetry_interval = 2.5
     with patch.object(app._telemetry_wake, "wait", side_effect=fake_wait), \
          patch("modules.tools.elenca_lettere_dischi", return_value=["C"]), \
          patch("modules.tools.mappa_dischi_fisici", return_value={"C": "PhysicalDrive0"}), \
@@ -169,12 +167,12 @@ def test_gui_loop_telemetria_single_tick(gui_app):
          patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "40 °C", "potenza_w": "20 W", "ventole_rpm": []}), \
          patch("modules.tools.monitora_gpu", return_value={"errore": "N/D"}), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
-         patch("modules.tools.misura_ping") as mock_ping:
+         patch("modules.tools.misura_ping", return_value={"stato": "15 ms"}) as mock_ping:
         with pytest.raises(KeyboardInterrupt):
             app._loop_telemetria()
         root.update()
-    mock_ping.assert_not_called()
-    assert "Ping: Pausa (Gaming)" in app.lbl_net.cget("text")
+    mock_ping.assert_called_once()
+    assert "Ping: 15 ms" in app.lbl_net.cget("text")
 
 
 def test_gui_local_actions_and_chat_flow(gui_app):

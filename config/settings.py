@@ -44,8 +44,8 @@ DISK_WARN = 80
 DISK_CRIT = 90
 
 # Intervalli di aggiornamento telemetria live (secondi)
-TELEMETRY_INTERVAL_NORMAL = 2
-TELEMETRY_INTERVAL_GAMING = 10
+TELEMETRY_INTERVAL_NORMAL = 1
+TELEMETRY_INTERVAL_GAMING = 2.5
 
 # Processi sicuri da chiudere in Modalità Gaming
 SAFE_TO_CLOSE = [
