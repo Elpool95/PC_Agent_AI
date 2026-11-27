@@ -397,6 +397,16 @@ def _dimensione_cartella_bytes(percorso: str) -> int:
             pass
     return tot
 
+def maschera_percorso_utente(testo: str) -> str:
+    """Sostituisce la cartella home utente (es. C:\\Users\\Nome) con %USERPROFILE% per tutelare la privacy."""
+    if not testo:
+        return testo
+    home = os.path.expanduser("~")
+    if home and len(home) > 3:
+        return re.sub(re.escape(home), "%USERPROFILE%", str(testo), flags=re.IGNORECASE)
+    return str(testo)
+
+
 def analizza_spazio_disco(unita: str = "C:") -> dict:
     """Analizza le principali cartelle cache/utente sul disco indicato (es. 'C:') per individuare cosa occupa spazio."""
     unita_norm = str(unita).strip().rstrip("\\").upper()
@@ -422,7 +432,7 @@ def analizza_spazio_disco(unita: str = "C:") -> dict:
     for etichetta, path in candidati:
         if path.upper().startswith(unita_norm) and os.path.exists(path):
             mb = round(_dimensione_cartella_bytes(path) / (1024 * 1024), 1)
-            risultati.append({"cartella": etichetta, "percorso": path, "mb": mb})
+            risultati.append({"cartella": etichetta, "percorso": maschera_percorso_utente(path), "mb": mb})
     risultati.sort(key=lambda x: x["mb"], reverse=True)
     uso = psutil.disk_usage(unita_norm + "\\")
     return {
@@ -529,7 +539,7 @@ def elenca_app_avvio() -> dict:
                 while True:
                     try:
                         nome, valore, _ = winreg.EnumValue(key, i)
-                        risultato[etichetta][nome] = valore
+                        risultato[etichetta][nome] = maschera_percorso_utente(str(valore))
                         i += 1
                     except OSError:
                         break

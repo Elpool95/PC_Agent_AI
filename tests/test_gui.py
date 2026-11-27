@@ -191,3 +191,12 @@ def test_gui_local_actions_and_chat_flow(gui_app):
     app._mostra_risposta("Risposta test")
     assert str(app.send_btn.cget("state")) == "normal"
     assert "Risposta test" in app.chat_area.get("1.0", tk.END)
+
+
+def test_gui_chiedi_conferma_utente(gui_app):
+    app, _, _ = gui_app
+    with patch("modules.agent_win11.messagebox.askyesno", return_value=True) as m_yes:
+        assert app._chiedi_conferma_utente("Confermi?") is True
+        m_yes.assert_called_once()
+    with patch("modules.agent_win11.messagebox.askyesno", return_value=False):
+        assert app._chiedi_conferma_utente("Confermi?") is False

@@ -264,3 +264,12 @@ def test_info_versioni_e_cpu_nome():
         v = tools.info_versioni_sistema()
     assert v["driver_gpu"] == "621.40"
     assert "Windows" in v["windows"]
+
+
+def test_maschera_percorso_utente():
+    home = os.path.expanduser("~")
+    esempio = os.path.join(home, "AppData", "Local", "Temp")
+    mascherato = tools.maschera_percorso_utente(esempio)
+    assert mascherato.startswith("%USERPROFILE%")
+    assert home.lower() not in mascherato.lower()
+    assert tools.maschera_percorso_utente("") == ""

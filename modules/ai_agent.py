@@ -6,13 +6,67 @@ from config.settings import GEMINI_MODEL, GEMINI_FALLBACK_MODELS, GEMINI_TIMEOUT
 from modules import tools
 
 class GeminiAgent:
-    def __init__(self):
+    def __init__(self, confirm_callback=None):
         self.client = None
         self.chat = None
         self.errore_init = None
         self.modello_corrente = GEMINI_MODEL
+        self.confirm_callback = confirm_callback
         self._config_chat = None
         self._inizializza(GEMINI_MODEL)
+
+    def _richiedi_conferma(self, descrizione: str) -> bool:
+        """Richiede conferma esplicita lato codice (Human-in-the-Loop) se un callback è configurato."""
+        if self.confirm_callback is None:
+            return True
+        try:
+            return bool(self.confirm_callback(descrizione))
+        except Exception:
+            return False
+
+    def _costruisci_tools(self) -> list:
+        def disabilita_app_avvio(nome_app: str) -> str:
+            """Rimuove un'app dall'avvio automatico dell'utente corrente (HKCU Run) previa conferma utente."""
+            if not self._richiedi_conferma(f"Rimuovere '{nome_app}' dalle app all'avvio automatico?"):
+                return "Operazione annullata dall'utente."
+            return tools.disabilita_app_avvio(nome_app)
+
+        def termina_processo(target: str) -> str:
+            """Termina in modo sicuro un processo dato PID o nome esatto previa conferma utente."""
+            if not self._richiedi_conferma(f"Terminare il processo '{target}'?"):
+                return "Operazione annullata dall'utente."
+            return tools.termina_processo(target)
+
+        def attiva_modalita_prestazioni() -> str:
+            """Attiva il piano Prestazioni Eccellenti e chiude app non protette previa conferma utente."""
+            if not self._richiedi_conferma("Attivare la Modalità Prestazioni e chiudere le app non essenziali?"):
+                return "Operazione annullata dall'utente."
+            return tools.attiva_modalita_prestazioni()
+
+        def pulisci_file_temporanei() -> str:
+            """Elimina i file temporanei non in uso da TEMP previa conferma utente."""
+            if not self._richiedi_conferma("Eliminare i file temporanei non in uso dalla cartella TEMP?"):
+                return "Operazione annullata dall'utente."
+            return tools.pulisci_file_temporanei()
+
+        return [
+            tools.analizza_sistema,
+            tools.leggi_sensori_cpu,
+            tools.monitora_gpu,
+            tools.monitora_archiviazione,
+            tools.analizza_spazio_disco,
+            tools.info_banchi_ram,
+            tools.info_rete_attiva,
+            tools.misura_ping,
+            tools.info_versioni_sistema,
+            tools.piano_energetico_attivo,
+            tools.elenca_app_avvio,
+            disabilita_app_avvio,
+            termina_processo,
+            attiva_modalita_prestazioni,
+            tools.ripristina_modalita_bilanciata,
+            pulisci_file_temporanei,
+        ]
 
     def _costruisci_config(self):
         cpu_nome = tools.info_cpu_nome()
@@ -34,24 +88,7 @@ class GeminiAgent:
         )
         return types.GenerateContentConfig(
             system_instruction=istruzioni,
-            tools=[
-                tools.analizza_sistema,
-                tools.leggi_sensori_cpu,
-                tools.monitora_gpu,
-                tools.monitora_archiviazione,
-                tools.analizza_spazio_disco,
-                tools.info_banchi_ram,
-                tools.info_rete_attiva,
-                tools.misura_ping,
-                tools.info_versioni_sistema,
-                tools.piano_energetico_attivo,
-                tools.elenca_app_avvio,
-                tools.disabilita_app_avvio,
-                tools.termina_processo,
-                tools.attiva_modalita_prestazioni,
-                tools.ripristina_modalita_bilanciata,
-                tools.pulisci_file_temporanei
-            ],
+            tools=self._costruisci_tools(),
             temperature=0.2,
         )
 

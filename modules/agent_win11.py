@@ -1,7 +1,7 @@
 import threading
 import time
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import messagebox, scrolledtext
 import psutil
 from config import settings as config
 from modules import tools
@@ -189,10 +189,27 @@ class PCAgentGUI:
             testo_banchi = "Banchi RAM: N/D"
         self.root.after(0, lambda: self.lbl_ram_banchi.config(text=testo_banchi))
 
-        self.agent = GeminiAgent()
+        self.agent = GeminiAgent(confirm_callback=self._chiedi_conferma_utente)
         if self.agent.errore_init:
             err = self.agent.errore_init
             self.root.after(0, self.aggiungi_testo, "Sistema", f"Avviso Agent AI offline ({err}). La telemetria locale resta attiva.\n")
+
+    def _chiedi_conferma_utente(self, messaggio: str) -> bool:
+        """Mostra un popup nativo sul thread GUI per confermare azioni sensibili richieste dall'AI."""
+        if threading.current_thread() is threading.main_thread():
+            return messagebox.askyesno("Conferma azione — PC Agent AI", messaggio, parent=self.root)
+        risultato = {"ok": False}
+        done = threading.Event()
+
+        def _apri_dialog():
+            try:
+                risultato["ok"] = messagebox.askyesno("Conferma azione — PC Agent AI", messaggio, parent=self.root)
+            finally:
+                done.set()
+
+        self.root.after(0, _apri_dialog)
+        done.wait()
+        return risultato["ok"]
 
     def _imposta_stato_modalita(self, modalita):
         if modalita == "gaming":
@@ -432,7 +449,7 @@ class PCAgentGUI:
             self.root.after(0, self.aggiungi_testo, "Agent", testo_msg)
 
         if self.agent is None:
-            self.agent = GeminiAgent()
+            self.agent = GeminiAgent(confirm_callback=self._chiedi_conferma_utente)
         risposta = self.agent.invia(testo, on_retry=avvisa_retry)
         self.root.after(0, self._mostra_risposta, risposta)
 
