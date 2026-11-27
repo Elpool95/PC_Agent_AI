@@ -693,3 +693,55 @@ def test_leggi_physx_auto_dch_priority():
     with patch("winreg.OpenKey", side_effect=[FileNotFoundError(), mock_key]), \
          patch("winreg.QueryValueEx", return_value=(1, 4)):
         assert tools._leggi_physx_auto() is True
+
+
+def test_salute_e_temperatura_storage_lhm():
+    lhm_payload = {
+        "Children": [
+            {
+                "Text": "Samsung SSD 990 1TB",
+                "ImageURL": "images_icon/hdd.png",
+                "Children": [
+                    {"Text": "Composite Temperature", "Value": "37,0 °C"},
+                    {"Text": "Life", "Value": "100,0 %"},
+                    {"Text": "Power On Hours", "Value": "26,000"},
+                    {"Text": "Data Written", "Value": "54,0 GB"},
+                ],
+            },
+            {
+                "Text": "WDC WD2500JS-60NCB2 ",
+                "ImageURL": "images_icon/hdd.png",
+                "Children": [
+                    {"Text": "Temperature", "Value": "52,0 °C"},
+                    {"Text": "Power On Hours", "Value": "20430,000"},
+                ],
+            },
+            {
+                "Text": "Old Failing SSD",
+                "ImageURL": "images_icon/hdd.png",
+                "Children": [
+                    {"Text": "Temperature", "Value": "45,0 °C"},
+                    {"Text": "Life", "Value": "8,0 %"},
+                ],
+            },
+        ]
+    }
+    estratti = tools._estrai_sensori_dischi_lhm(lhm_payload)
+    assert estratti["samsung ssd 990 1tb"]["temp_num"] == 37
+    assert estratti["samsung ssd 990 1tb"]["life_percent"] == 100
+    assert estratti["wdc wd2500js-60ncb2"]["temp_num"] == 52
+
+    mappa_info = {
+        "E": {"drive": "PhysicalDrive4", "modello": "Samsung SSD 990 1TB", "tipo": "SSD", "bus": "NVMe", "health_win": "Healthy"},
+        "D": {"drive": "PhysicalDrive2", "modello": "WDC WD2500JS-60NCB2", "tipo": "HDD", "bus": "SATA", "health_win": "Healthy"},
+        "X": {"drive": "PhysicalDrive9", "modello": "Old Failing SSD", "tipo": "SSD", "bus": "SATA", "health_win": "Healthy"},
+    }
+    salute = tools.stato_salute_dischi(mappa_info, estratti)
+    assert salute["E"]["stato"] == "Good"
+    assert salute["E"]["etichetta_breve"] == "Good 100%"
+    assert salute["E"]["temperatura_c"] == "37°C"
+    assert salute["D"]["stato"] == "Caution"
+    assert salute["D"]["temp_alta"] is True
+    assert "52°C" in salute["D"]["etichetta"]
+    assert salute["X"]["stato"] == "Bad"
+    assert "8%" in salute["X"]["etichetta"]

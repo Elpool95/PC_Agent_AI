@@ -128,22 +128,32 @@ def test_gui_loop_telemetria_single_tick(gui_app):
     fake_ram = SimpleNamespace(used=8 * 1024**3, total=24 * 1024**3, percent=33.3)
     fake_disk = SimpleNamespace(free=50 * 1024**3, percent=92.0)
 
+    fake_info_dischi = {
+        "C": {"drive": "PhysicalDrive0", "modello": "Samsung SSD 850 EVO 250GB", "tipo": "SSD", "bus": "SATA", "health_win": "Healthy"}
+    }
+    fake_lhm_ok = {
+        "temperatura_c": "40 °C", "potenza_w": "20 W", "ventole_rpm": ["F1: 1500 RPM"],
+        "dischi_lhm": {"samsung ssd 850 evo 250gb": {"temp_num": 41, "temperatura_c": "41°C", "life_percent": 89}},
+    }
+
     with patch.object(app._telemetry_wake, "wait", side_effect=fake_wait), \
          patch("modules.tools.elenca_lettere_dischi", return_value=["C"]), \
+         patch("modules.tools.mappa_info_dischi_fisici", return_value=fake_info_dischi), \
          patch("modules.tools.mappa_dischi_fisici", return_value={"C": "PhysicalDrive0"}), \
          patch("psutil.disk_io_counters", return_value=io_disk), \
          patch("psutil.net_io_counters", return_value=io_net), \
          patch("psutil.disk_usage", return_value=fake_disk), \
          patch("psutil.cpu_percent", return_value=22.0), \
          patch("psutil.virtual_memory", return_value=fake_ram), \
-         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "40 °C", "potenza_w": "20 W", "ventole_rpm": ["F1: 1500 RPM"]}), \
+         patch("modules.tools.leggi_sensori_lhm", return_value=fake_lhm_ok), \
          patch("modules.tools.monitora_gpu", return_value={
              "gpu": "NVIDIA GeForce RTX 3070", "utilizzo_percent": "10%", "temperatura_c": "42°C",
              "temperatura_num": 42, "vram_usata_mb": "800", "vram_totale_mb": "8192",
              "consumo_watt": "28 W", "ventola_percent": "0%", "clock_mhz": "210 MHz"
          }), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
-         patch("modules.tools.misura_ping", return_value={"stato": "12 ms"}):
+         patch("modules.tools.misura_ping", return_value={"stato": "12 ms"}), \
+         patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: OK", "colore": "#81c784"}):
         with pytest.raises(KeyboardInterrupt):
             app._loop_telemetria()
         root.update()
@@ -151,6 +161,8 @@ def test_gui_loop_telemetria_single_tick(gui_app):
     assert "CPU: 22.0%" in app.lbl_cpu.cget("text")
     assert "RTX 3070" in app.lbl_gpu.cget("text")
     assert "Ping: 12 ms" in app.lbl_net.cget("text")
+    assert "41°C" in app.disk_labels["C"].cget("text")
+    assert "Good 89%" in app.disk_labels["C"].cget("text")
     assert app.disk_labels["C"].cget("fg") == "#ff5252"
 
     # Verifica che il ping resti attivo anche in Gaming Mode (intervallo 2.5s)
@@ -158,16 +170,18 @@ def test_gui_loop_telemetria_single_tick(gui_app):
     app._telemetry_interval = 2.5
     with patch.object(app._telemetry_wake, "wait", side_effect=fake_wait), \
          patch("modules.tools.elenca_lettere_dischi", return_value=["C"]), \
+         patch("modules.tools.mappa_info_dischi_fisici", return_value=fake_info_dischi), \
          patch("modules.tools.mappa_dischi_fisici", return_value={"C": "PhysicalDrive0"}), \
          patch("psutil.disk_io_counters", return_value=io_disk), \
          patch("psutil.net_io_counters", return_value=io_net), \
          patch("psutil.disk_usage", return_value=fake_disk), \
          patch("psutil.cpu_percent", return_value=22.0), \
          patch("psutil.virtual_memory", return_value=fake_ram), \
-         patch("modules.tools.leggi_sensori_cpu", return_value={"temperatura_c": "40 °C", "potenza_w": "20 W", "ventole_rpm": []}), \
+         patch("modules.tools.leggi_sensori_lhm", return_value={"temperatura_c": "40 °C", "potenza_w": "20 W", "ventole_rpm": [], "dischi_lhm": {}}), \
          patch("modules.tools.monitora_gpu", return_value={"errore": "N/D"}), \
          patch("modules.tools.info_rete_attiva", return_value={"nome": "Ethernet", "ip": "192.168.1.2", "link_mbps": 1000}), \
-         patch("modules.tools.misura_ping", return_value={"stato": "15 ms"}) as mock_ping:
+         patch("modules.tools.misura_ping", return_value={"stato": "15 ms"}) as mock_ping, \
+         patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: OK", "colore": "#81c784"}):
         with pytest.raises(KeyboardInterrupt):
             app._loop_telemetria()
         root.update()
@@ -187,10 +201,14 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         assert "Top 5 processi RAM" in app.chat_area.get("1.0", tk.END)
 
     with patch("modules.tools.monitora_archiviazione", return_value=[{"unita": "C:\\", "usati_gb": 200, "totali_gb": 220, "percent": 91.0, "liberi_gb": 20}]), \
+         patch("modules.tools.stato_salute_dischi", return_value={"C": {"modello": "Samsung 850 EVO", "tipo": "SSD", "bus": "SATA", "etichetta": "Good 89%", "temperatura_c": "41°C", "power_on_hours": 29000, "data_written_gb": 44870.0}}), \
          patch("modules.tools.analizza_spazio_disco", return_value={"cartelle_analizzate": [{"cartella": "Temp", "mb": 50.0, "percorso": "C:\\Temp"}]}):
         app.azione_dischi_locale()
         root.update()
-        assert "SPAZIO CRITICO" in app.chat_area.get("1.0", tk.END)
+        txt_disk = app.chat_area.get("1.0", tk.END)
+        assert "SPAZIO CRITICO" in txt_disk
+        assert "Good 89%" in txt_disk
+        assert "41°C" in txt_disk
 
     with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap 72 ●", "colore": "#81c784"}), \
          patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \

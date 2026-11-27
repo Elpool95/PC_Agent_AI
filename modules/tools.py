@@ -15,6 +15,7 @@ from config.settings import (
     GAMING_THROTTLE_PROCESSES,
     GAMING_STATE_FILE, TELEMETRY_INTERVAL_NORMAL, TELEMETRY_INTERVAL_GAMING,
     FPS_CAP_MARGIN_HZ, FPS_CAP_MIN,
+    DISK_TEMP_WARN_HDD, DISK_TEMP_CRIT_HDD, DISK_TEMP_WARN_SSD, DISK_TEMP_CRIT_SSD,
 )
 
 def _trova_nvidia_smi() -> str:
@@ -154,17 +155,129 @@ def _cerca_ventole_attive(nodo, risultati=None) -> list[str]:
             _cerca_ventole_attive(elem, risultati)
     return risultati
 
-def leggi_sensori_cpu() -> dict:
-    """Legge temperatura (°C), potenza (W) della CPU e ventole di sistema (RPM) da LibreHardwareMonitor."""
+def _parse_numero_lhm(valore: str) -> float | None:
+    """Estrae un valore numerico float da una stringa sensore LHM (es. '41,0 °C' -> 41.0)."""
+    m = re.search(r"(-?\d+(?:[.,]\d+)?)", str(valore or ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _raccogli_sensori_drive_lhm(nodo, acc: dict) -> None:
+    """Raccoglie ricorsivamente temperatura, vita residua e metriche S.M.A.R.T. di un singolo drive nel JSON LHM."""
+    if isinstance(nodo, dict):
+        testo = str(nodo.get("Text", "")).strip()
+        valore = str(nodo.get("Value", "")).strip()
+        tl = testo.lower()
+        if valore:
+            num = _parse_numero_lhm(valore)
+            if "°c" in valore.lower() and num is not None:
+                if "composite" in tl:
+                    acc["temp_composite"] = num
+                elif tl == "temperature":
+                    acc["temp_main"] = num
+                elif tl == "temperature #1" and "temp_alt" not in acc:
+                    acc["temp_alt"] = num
+            elif "%" in valore and num is not None:
+                if tl in ("life", "remaining life", "health"):
+                    acc["life_percent"] = max(0.0, min(100.0, num))
+                elif "percentage used" in tl and "life_percent" not in acc:
+                    acc["life_percent"] = max(0.0, min(100.0, 100.0 - num))
+                elif "available spare" in tl and "threshold" not in tl:
+                    acc["available_spare"] = num
+            elif num is not None:
+                if "power on hours" in tl:
+                    acc["power_on_hours"] = int(round(num))
+                elif "data written" in tl or "total lbas written" in tl:
+                    if "tb" in valore.lower():
+                        acc["data_written_gb"] = round(num * 1024.0, 1)
+                    elif "gb" in valore.lower():
+                        acc["data_written_gb"] = round(num, 1)
+                elif "reallocated" in tl and "event" not in tl:
+                    acc["reallocated"] = int(round(num))
+                elif "pending" in tl:
+                    acc["pending"] = int(round(num))
+                elif "uncorrectable" in tl or "media errors" in tl:
+                    acc["uncorrectable"] = int(round(num))
+        for figlio in nodo.get("Children", []):
+            _raccogli_sensori_drive_lhm(figlio, acc)
+    elif isinstance(nodo, list):
+        for elem in nodo:
+            _raccogli_sensori_drive_lhm(elem, acc)
+
+
+def _estrai_sensori_dischi_lhm(nodo, risultati=None) -> dict:
+    """Estrae dal JSON LHM i sensori S.M.A.R.T./temperatura di tutti i dischi fisici indicizzati per nome normalizzato."""
+    if risultati is None:
+        risultati = {}
+    if isinstance(nodo, dict):
+        img = str(nodo.get("ImageURL", "")).lower()
+        if "hdd.png" in img:
+            nome = str(nodo.get("Text", "")).strip()
+            if nome:
+                acc = {}
+                _raccogli_sensori_drive_lhm(nodo, acc)
+                temp_num = acc.get("temp_composite")
+                if temp_num is None:
+                    temp_num = acc.get("temp_main")
+                if temp_num is None:
+                    temp_num = acc.get("temp_alt")
+                risultati[nome.lower()] = {
+                    "modello_lhm": nome,
+                    "temp_num": int(round(temp_num)) if temp_num is not None else None,
+                    "temperatura_c": f"{int(round(temp_num))}°C" if temp_num is not None else "N/D",
+                    "life_percent": int(round(acc["life_percent"])) if "life_percent" in acc else None,
+                    "available_spare": int(round(acc["available_spare"])) if "available_spare" in acc else None,
+                    "power_on_hours": acc.get("power_on_hours"),
+                    "data_written_gb": acc.get("data_written_gb"),
+                    "reallocated": acc.get("reallocated", 0),
+                    "pending": acc.get("pending", 0),
+                    "uncorrectable": acc.get("uncorrectable", 0),
+                }
+            return risultati
+        for figlio in nodo.get("Children", []):
+            _estrai_sensori_dischi_lhm(figlio, risultati)
+    elif isinstance(nodo, list):
+        for elem in nodo:
+            _estrai_sensori_dischi_lhm(elem, risultati)
+    return risultati
+
+
+def leggi_sensori_lhm() -> dict:
+    """Legge in una sola chiamata HTTP a LibreHardwareMonitor sia i sensori CPU/ventole sia temperature/S.M.A.R.T. dei dischi."""
     try:
         with urllib.request.urlopen("http://localhost:8085/data.json", timeout=0.4) as resp:
             dati = json.loads(resp.read().decode("utf-8"))
             temp = _cerca_temp_cpu(dati) or "N/D"
             watt = _cerca_potenza_cpu(dati, "CPU Package") or _cerca_potenza_cpu(dati, "CPU Cores") or "N/D"
             ventole = _cerca_ventole_attive(dati)
-            return {"temperatura_c": temp, "potenza_w": watt, "ventole_rpm": ventole}
+            dischi = _estrai_sensori_dischi_lhm(dati)
+            return {
+                "temperatura_c": temp,
+                "potenza_w": watt,
+                "ventole_rpm": ventole,
+                "dischi_lhm": dischi,
+            }
     except Exception:
-        return {"temperatura_c": "-- °C (avvia LHM)", "potenza_w": "-- W", "ventole_rpm": []}
+        return {
+            "temperatura_c": "-- °C (avvia LHM)",
+            "potenza_w": "-- W",
+            "ventole_rpm": [],
+            "dischi_lhm": {},
+        }
+
+
+def leggi_sensori_cpu() -> dict:
+    """Legge temperatura (°C), potenza (W) della CPU e ventole di sistema (RPM) da LibreHardwareMonitor."""
+    dati = leggi_sensori_lhm()
+    return {
+        "temperatura_c": dati["temperatura_c"],
+        "potenza_w": dati["potenza_w"],
+        "ventole_rpm": dati["ventole_rpm"],
+    }
 
 def leggi_temp_cpu() -> str:
     """Legge la temperatura della CPU da LibreHardwareMonitor (http://localhost:8085/data.json) se attivo."""
@@ -181,6 +294,151 @@ def elenca_lettere_dischi() -> list[str]:
             if lettera not in lettere:
                 lettere.append(lettera)
     return sorted(lettere)
+
+def mappa_info_dischi_fisici(lettere=None) -> dict:
+    """Associa ogni lettera di unità a PhysicalDriveX, modello, tipo (SSD/HDD), bus (NVMe/SATA) e HealthStatus Windows."""
+    mappa = {}
+    try:
+        ps_cmd = (
+            "$pds = Get-PhysicalDisk; "
+            "Get-Partition | Where-Object {$_.DriveLetter} | ForEach-Object { "
+            "$num = $_.DiskNumber; "
+            "$pd = $pds | Where-Object {$_.DeviceId -eq [string]$num} | Select-Object -First 1; "
+            "[PSCustomObject]@{ "
+            "Letter = [string]$_.DriveLetter; "
+            "Drive = 'PhysicalDrive' + $num; "
+            "Model = if($pd){$pd.FriendlyName}else{''}; "
+            "MediaType = if($pd){[string]$pd.MediaType}else{''}; "
+            "BusType = if($pd){[string]$pd.BusType}else{''}; "
+            "Health = if($pd){[string]$pd.HealthStatus}else{'Unknown'} "
+            "} } | ConvertTo-Json -Compress"
+        )
+        output = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            encoding="utf-8", stderr=subprocess.DEVNULL, timeout=10, creationflags=NO_WINDOW
+        ).strip()
+        if output:
+            dati = json.loads(output)
+            if isinstance(dati, dict):
+                dati = [dati]
+            for item in dati:
+                lettera = str(item.get("Letter") or "").strip().upper()
+                if not lettera or (lettere is not None and lettera not in lettere):
+                    continue
+                modello = str(item.get("Model") or "").strip()
+                media = str(item.get("MediaType") or "").strip()
+                bus = str(item.get("BusType") or "").strip()
+                if media in ("", "Unspecified"):
+                    media = "SSD" if ("ssd" in modello.lower() or bus.upper() == "NVME") else "HDD"
+                mappa[lettera] = {
+                    "drive": str(item.get("Drive") or "").strip(),
+                    "modello": modello,
+                    "tipo": media,
+                    "bus": bus,
+                    "health_win": str(item.get("Health") or "Unknown").strip(),
+                }
+    except Exception:
+        pass
+    return mappa
+
+
+def _abbina_lhm_disco(modello: str, dischi_lhm: dict) -> dict:
+    """Abbina un modello disco di Windows alla relativa voce LHM (match esatto o per sottostringa)."""
+    if not modello or not dischi_lhm:
+        return {}
+    m_low = modello.strip().lower()
+    if m_low in dischi_lhm:
+        return dischi_lhm[m_low]
+    for k, val in dischi_lhm.items():
+        if m_low in k or k in m_low:
+            return val
+    return {}
+
+
+def _valuta_salute_disco(info_disco: dict, sensori_lhm: dict) -> dict:
+    """Calcola stato salute stile CrystalDiskInfo ('Good', 'Caution', 'Bad', 'Unknown') da Health Windows, vita SSD, S.M.A.R.T. e temperatura."""
+    health_win = str(info_disco.get("health_win") or "Unknown")
+    tipo = str(info_disco.get("tipo") or "HDD").upper()
+    is_ssd = tipo == "SSD" or str(info_disco.get("bus") or "").upper() == "NVME"
+    temp_warn = DISK_TEMP_WARN_SSD if is_ssd else DISK_TEMP_WARN_HDD
+    temp_crit = DISK_TEMP_CRIT_SSD if is_ssd else DISK_TEMP_CRIT_HDD
+
+    temp_num = sensori_lhm.get("temp_num")
+    life_pct = sensori_lhm.get("life_percent")
+    reallocated = sensori_lhm.get("reallocated", 0) or 0
+    pending = sensori_lhm.get("pending", 0) or 0
+    uncorrectable = sensori_lhm.get("uncorrectable", 0) or 0
+
+    motivi = []
+    stato = "Good" if health_win.lower() == "healthy" else "Unknown"
+
+    if health_win.lower() in ("unhealthy", "failed"):
+        stato = "Bad"
+        motivi.append(f"Windows: {health_win}")
+    elif health_win.lower() in ("warning", "degraded"):
+        stato = "Caution"
+        motivi.append(f"Windows: {health_win}")
+
+    if uncorrectable > 0 or reallocated >= 10:
+        stato = "Bad"
+        motivi.append("errori S.M.A.R.T.")
+    elif reallocated > 0 or pending > 0:
+        if stato != "Bad":
+            stato = "Caution"
+        motivi.append("settori riallocati/pendenti")
+
+    if life_pct is not None:
+        if life_pct <= 10:
+            stato = "Bad"
+            motivi.append(f"vita {life_pct}%")
+        elif life_pct <= 30:
+            if stato != "Bad":
+                stato = "Caution"
+            motivi.append(f"vita {life_pct}%")
+
+    if temp_num is not None:
+        if temp_num >= temp_crit:
+            stato = "Bad"
+            motivi.append(f"Temp {temp_num}°C")
+        elif temp_num >= temp_warn:
+            if stato != "Bad":
+                stato = "Caution"
+            motivi.append(f"Temp {temp_num}°C")
+
+    if stato == "Good" and life_pct is not None:
+        etichetta = f"Good {life_pct}%"
+    elif motivi:
+        etichetta = f"{stato} ({', '.join(motivi)})"
+    else:
+        etichetta = stato
+
+    return {
+        "stato": stato,
+        "etichetta": etichetta,
+        "etichetta_breve": f"Good {life_pct}%" if (stato == "Good" and life_pct is not None) else stato,
+        "temp_num": temp_num,
+        "temperatura_c": sensori_lhm.get("temperatura_c", "N/D"),
+        "temp_alta": temp_num is not None and temp_num >= temp_warn,
+        "life_percent": life_pct,
+        "power_on_hours": sensori_lhm.get("power_on_hours"),
+        "data_written_gb": sensori_lhm.get("data_written_gb"),
+        "modello": info_disco.get("modello", ""),
+        "tipo": info_disco.get("tipo", ""),
+        "bus": info_disco.get("bus", ""),
+        "health_win": health_win,
+    }
+
+
+def stato_salute_dischi(mappa_info: dict | None = None, dischi_lhm: dict | None = None) -> dict:
+    """Restituisce temperatura e stato salute stile CrystalDiskInfo (Good/Caution/Bad) per ogni lettera di unità montata."""
+    info_map = mappa_info if mappa_info is not None else mappa_info_dischi_fisici()
+    lhm_map = dischi_lhm if dischi_lhm is not None else leggi_sensori_lhm().get("dischi_lhm", {})
+    risultato = {}
+    for lettera, info in info_map.items():
+        sens = _abbina_lhm_disco(info.get("modello", ""), lhm_map)
+        risultato[lettera] = _valuta_salute_disco(info, sens)
+    return risultato
+
 
 def mappa_dischi_fisici(lettere=None) -> dict:
     """Associa le lettere di unità (es. C, D, E, ...) al rispettivo PhysicalDriveX di Windows."""

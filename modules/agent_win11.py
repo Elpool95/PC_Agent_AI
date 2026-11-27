@@ -178,6 +178,7 @@ class PCAgentGUI:
         self.aggiungi_testo("Agent", "Pronto. Telemetria live attiva: CPU (Temp + W), RAM, tutti i dischi, GPU e Rete.\n")
 
         self.ram_info_hw = {"banchi": [], "frequenza_mhz": 0, "tipo": "RAM", "modalita_canale": "", "totale_gb": 0}
+        self.dischi_info_hw = {}
         self._telemetry_interval = config.TELEMETRY_INTERVAL_NORMAL
         self._telemetry_wake = threading.Event()
 
@@ -273,7 +274,9 @@ class PCAgentGUI:
 
     def _loop_telemetria(self):
         lettere_correnti = tools.elenca_lettere_dischi()
-        mappa_dischi = tools.mappa_dischi_fisici()
+        mappa_info = tools.mappa_info_dischi_fisici()
+        self.dischi_info_hw = mappa_info
+        mappa_dischi = {k: v["drive"] for k, v in mappa_info.items() if v.get("drive")} or tools.mappa_dischi_fisici()
         prev_io = psutil.disk_io_counters(perdisk=True)
         prev_net = psutil.net_io_counters(pernic=True)
         prev_time = time.time()
@@ -293,16 +296,40 @@ class PCAgentGUI:
                 nuove_lettere = tools.elenca_lettere_dischi()
                 if nuove_lettere != lettere_correnti:
                     lettere_correnti = nuove_lettere
-                    mappa_dischi = tools.mappa_dischi_fisici()
+                    mappa_info = tools.mappa_info_dischi_fisici()
+                    self.dischi_info_hw = mappa_info
+                    mappa_dischi = {k: v["drive"] for k, v in mappa_info.items() if v.get("drive")} or tools.mappa_dischi_fisici()
+
+                cpu = psutil.cpu_percent(interval=None)
+                sensori_lhm = tools.leggi_sensori_lhm()
+                cpu_temp = sensori_lhm["temperatura_c"]
+                cpu_watt = sensori_lhm["potenza_w"]
+                ventole = sensori_lhm["ventole_rpm"]
+                ventole_str = f"  |  {' '.join(ventole[:3])}" if ventole else ""
+                salute_dischi = tools.stato_salute_dischi(mappa_info, sensori_lhm.get("dischi_lhm", {}))
 
                 dischi_items = []
                 for lettera in lettere_correnti:
+                    salute = salute_dischi.get(lettera, {})
+                    stato_h = salute.get("stato", "Unknown")
+                    temp_str = salute.get("temperatura_c", "N/D")
+                    health_tag = salute.get("etichetta_breve", "")
                     try:
                         uso = psutil.disk_usage(f"{lettera}:\\")
                         liberi = round(uso.free / (1024**3), 0)
                         avviso = " [!]" if uso.percent >= config.DISK_CRIT else ""
-                        info = f"{lettera}: {uso.percent}%{avviso} ({int(liberi)}GB liberi)"
-                        colore = "#ff5252" if uso.percent >= config.DISK_CRIT else ("#ffb74d" if uso.percent >= config.DISK_WARN else "#ce93d8")
+                        info = f"{lettera}: {uso.percent}%{avviso} ({int(liberi)}GB)"
+                        if temp_str and temp_str != "N/D":
+                            t_warn = " [!]" if salute.get("temp_alta") else ""
+                            info += f" | {temp_str}{t_warn}"
+                        if health_tag and health_tag != "Unknown":
+                            info += f" | {health_tag}"
+                        if uso.percent >= config.DISK_CRIT or stato_h == "Bad":
+                            colore = "#ff5252"
+                        elif uso.percent >= config.DISK_WARN or stato_h == "Caution":
+                            colore = "#ffb74d"
+                        else:
+                            colore = "#ce93d8"
                     except Exception:
                         info = f"{lettera}: N/D"
                         colore = "#ce93d8"
@@ -311,17 +338,10 @@ class PCAgentGUI:
                     if drive_fisico and drive_fisico in curr_io and drive_fisico in prev_io:
                         r_mb = round((curr_io[drive_fisico].read_bytes - prev_io[drive_fisico].read_bytes) / dt / (1024 * 1024), 1)
                         w_mb = round((curr_io[drive_fisico].write_bytes - prev_io[drive_fisico].write_bytes) / dt / (1024 * 1024), 1)
-                        info += f" R {r_mb}/W {w_mb} MB/s"
+                        info += f" | R {r_mb}/W {w_mb} MB/s"
                     dischi_items.append((lettera, info, colore))
 
                 prev_io, prev_time = curr_io, now
-
-                cpu = psutil.cpu_percent(interval=None)
-                sensori_cpu = tools.leggi_sensori_cpu()
-                cpu_temp = sensori_cpu["temperatura_c"]
-                cpu_watt = sensori_cpu["potenza_w"]
-                ventole = sensori_cpu["ventole_rpm"]
-                ventole_str = f"  |  {' '.join(ventole[:3])}" if ventole else ""
 
                 ram = psutil.virtual_memory()
                 ram_used = round(ram.used / (1024**3), 1)
@@ -437,10 +457,24 @@ class PCAgentGUI:
 
     def azione_dischi_locale(self):
         dischi = tools.monitora_archiviazione()
-        righe = ["Stato partizioni e dischi:"]
+        salute_map = tools.stato_salute_dischi(self.dischi_info_hw or None)
+        righe = ["Stato partizioni, salute S.M.A.R.T. e temperature:"]
         for d in dischi:
+            lettera = str(d["unita"])[0].upper() if d.get("unita") else ""
+            s = salute_map.get(lettera, {})
             avviso = "  [SPAZIO CRITICO]" if d['percent'] >= config.DISK_CRIT else ""
-            righe.append(f"  - {d['unita']}  Usati: {d['usati_gb']}/{d['totali_gb']} GB ({d['percent']}%) | Liberi: {d['liberi_gb']} GB{avviso}")
+            mod_str = f" [{s['modello']} | {s['tipo']} {s['bus']}]" if s.get("modello") else ""
+            righe.append(
+                f"  - {d['unita']}{mod_str}  Usati: {d['usati_gb']}/{d['totali_gb']} GB ({d['percent']}%) | Liberi: {d['liberi_gb']} GB{avviso}"
+            )
+            if s:
+                dettagli = [f"Salute: {s.get('etichetta', 'N/D')}", f"Temp: {s.get('temperatura_c', 'N/D')}"]
+                if s.get("power_on_hours") is not None:
+                    dettagli.append(f"Ore: {s['power_on_hours']} h")
+                if s.get("data_written_gb") is not None:
+                    gb_w = s["data_written_gb"]
+                    dettagli.append(f"Scritture: {gb_w / 1024:.1f} TB" if gb_w >= 1024 else f"Scritture: {gb_w:.0f} GB")
+                righe.append("    " + " | ".join(dettagli))
         analisi_c = tools.analizza_spazio_disco("C:")
         if analisi_c["cartelle_analizzate"]:
             righe.append("Principali cartelle/cache su C::")

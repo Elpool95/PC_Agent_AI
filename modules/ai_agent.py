@@ -60,6 +60,7 @@ class GeminiAgent:
             tools.leggi_sensori_cpu,
             tools.monitora_gpu,
             tools.monitora_archiviazione,
+            tools.stato_salute_dischi,
             tools.analizza_spazio_disco,
             tools.info_banchi_ram,
             tools.info_rete_attiva,
