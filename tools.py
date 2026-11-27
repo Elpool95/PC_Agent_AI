@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import urllib.request
@@ -197,6 +198,100 @@ def info_versioni_sistema() -> dict:
         pass
 
     return {"windows": win_str, "driver_gpu": driver_str}
+
+def info_banchi_ram() -> dict:
+    """Legge i dettagli hardware di tutti i banchi RAM installati (slot, GB, DDR, frequenza MHz, voltaggio, codice)."""
+    tipi_ddr = {20: "DDR", 21: "DDR2", 24: "DDR3", 26: "DDR4", 34: "DDR5"}
+    banchi = []
+    try:
+        ps_cmd = (
+            "Get-CimInstance Win32_PhysicalMemory | "
+            "Select-Object BankLabel, DeviceLocator, PartNumber, Capacity, Speed, "
+            "ConfiguredClockSpeed, ConfiguredVoltage, SMBIOSMemoryType | ConvertTo-Json -Compress"
+        )
+        output = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            encoding="utf-8", stderr=subprocess.DEVNULL, creationflags=NO_WINDOW
+        ).strip()
+        if output:
+            dati = json.loads(output)
+            if isinstance(dati, dict):
+                dati = [dati]
+            for item in dati:
+                cap_bytes = item.get("Capacity") or 0
+                gb = round(cap_bytes / (1024**3))
+                freq = item.get("ConfiguredClockSpeed") or item.get("Speed") or 0
+                volt_mv = item.get("ConfiguredVoltage") or 0
+                volt_str = f"{volt_mv / 1000:.2f}V" if volt_mv else "N/D"
+                smbios_type = item.get("SMBIOSMemoryType") or 0
+                tipo = tipi_ddr.get(smbios_type, "RAM")
+                locator = (item.get("DeviceLocator") or item.get("BankLabel") or "DIMM").strip()
+                slot_breve = locator.replace("Channel", "Ch").replace("DIMM_", "DIMM")
+                part = (item.get("PartNumber") or "").strip()
+                banchi.append({
+                    "bank": (item.get("BankLabel") or "").strip(),
+                    "slot": locator,
+                    "slot_breve": slot_breve,
+                    "gb": gb,
+                    "tipo": tipo,
+                    "frequenza_mhz": int(freq) if freq else 0,
+                    "voltaggio": volt_str,
+                    "part_number": part
+                })
+    except Exception:
+        pass
+
+    canali = set()
+    for b in banchi:
+        m = re.search(r"Channel\s*([A-Za-z0-9]+)", b["slot"], re.IGNORECASE)
+        if m:
+            canali.add(m.group(1).upper())
+    if len(canali) >= 2:
+        modalita = "Dual Channel" if len(canali) == 2 else f"{len(canali)}-Channel"
+    elif len(banchi) == 1 or len(canali) == 1:
+        modalita = "Single Channel"
+    else:
+        modalita = f"{len(banchi)} banchi" if banchi else "N/D"
+
+    freq_attiva = banchi[0]["frequenza_mhz"] if banchi else 0
+    tipo_ram = banchi[0]["tipo"] if banchi else "RAM"
+    return {
+        "banchi": banchi,
+        "frequenza_mhz": freq_attiva,
+        "tipo": tipo_ram,
+        "modalita_canale": modalita,
+        "totale_gb": sum(b["gb"] for b in banchi)
+    }
+
+def info_rete_attiva() -> dict:
+    """Rileva l'interfaccia di rete attiva principale (nome, IPv4, velocità link in Mbps)."""
+    try:
+        stats = psutil.net_if_stats()
+        addrs = psutil.net_if_addrs()
+        migliore = None
+        for nome, st in stats.items():
+            if not st.isup or "loopback" in nome.lower():
+                continue
+            ipv4_list = [
+                a.address for a in addrs.get(nome, [])
+                if a.family == socket.AF_INET and not a.address.startswith("169.254.")
+            ]
+            if ipv4_list:
+                info = {"nome": nome, "ip": ipv4_list[0], "link_mbps": st.speed}
+                if migliore is None or (st.speed > migliore["link_mbps"]):
+                    migliore = info
+        if migliore:
+            return migliore
+    except Exception:
+        pass
+    return {"nome": "Offline", "ip": "N/D", "link_mbps": 0}
+
+def formatta_velocita_rete(bytes_sec: float) -> str:
+    """Formatta byte/s in Mbps o Kbps leggibili."""
+    bps = max(bytes_sec, 0.0) * 8.0
+    if bps >= 1_000_000:
+        return f"{bps / 1_000_000:.2f} Mbps"
+    return f"{bps / 1_000:.1f} Kbps"
 
 def monitora_archiviazione() -> list:
     """Legge spazio usato, libero e percentuale di tutte le partizioni fisse."""
