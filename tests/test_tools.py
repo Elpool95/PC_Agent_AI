@@ -510,19 +510,23 @@ def test_priorita_background_gaming_e_anticheat_intatto():
     p_steam.info = {"name": "steamwebhelper.exe"}
     p_vgc = MagicMock()
     p_vgc.info = {"name": "vgc.exe"}
+    p_riot = MagicMock()
+    p_riot.info = {"name": "riotclientux.exe"}
 
-    with patch("psutil.process_iter", return_value=[p_discord, p_steam, p_vgc]):
+    with patch("psutil.process_iter", return_value=[p_discord, p_steam, p_vgc, p_riot]):
         mod = tools.imposta_priorita_background_gaming(True)
     assert mod == ["discord.exe", "steamwebhelper.exe"]
     p_discord.nice.assert_called_once_with(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     p_steam.nice.assert_called_once_with(psutil.BELOW_NORMAL_PRIORITY_CLASS)
     p_vgc.nice.assert_not_called()
+    p_riot.nice.assert_not_called()
 
-    with patch("psutil.process_iter", return_value=[p_discord, p_steam, p_vgc]):
+    with patch("psutil.process_iter", return_value=[p_discord, p_steam, p_vgc, p_riot]):
         restored = tools.imposta_priorita_background_gaming(False)
     assert restored == ["discord.exe", "steamwebhelper.exe"]
     p_discord.nice.assert_called_with(psutil.NORMAL_PRIORITY_CLASS)
     p_vgc.nice.assert_not_called()
+    p_riot.nice.assert_not_called()
 
 
 def test_vrr_windows_parse_leggi_e_abilita():

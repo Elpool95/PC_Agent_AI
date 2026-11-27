@@ -67,13 +67,11 @@ PROTECTED_PROCESSES = {
 # Servizi Windows non essenziali mettibili temporaneamente in pausa in Gaming Mode (allowlist fissa)
 GAMING_PAUSABLE_SERVICES = ("WSearch", "SysMain", "DiagTrack")
 
-# Processi background tenuti aperti in Gaming Mode ma impostati a priorità CPU ridotta (mai anti-cheat o sistema)
+# Processi background tenuti aperti in Gaming Mode ma impostati a priorità CPU ridotta (mai anti-cheat, Riot o sistema)
 GAMING_THROTTLE_PROCESSES = {
     "steamwebhelper.exe",
     "discord.exe",
     "epicwebhelper.exe",
-    "riotclientux.exe",
-    "riotclientuxrender.exe",
 }
 
 NO_WINDOW = subprocess.CREATE_NO_WINDOW

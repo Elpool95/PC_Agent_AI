@@ -799,7 +799,10 @@ def ripristina_ottimizzazioni_registro_gaming() -> int:
     return ripristinati
 
 
-_ANTICHEAT_MAI_TOCCARE = {"vgc.exe", "vgtray.exe", "riotclientservices.exe"}
+_ANTICHEAT_MAI_TOCCARE = {
+    "vgc.exe", "vgtray.exe",
+    "riotclientservices.exe", "riotclientux.exe", "riotclientuxrender.exe",
+}
 
 
 def imposta_priorita_background_gaming(bassa: bool) -> list[str]:
