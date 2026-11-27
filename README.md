@@ -83,7 +83,9 @@ Puoi modificare soglie di allerta, modelli Gemini, app chiudibili in `Gaming Mod
 - `reports/` — log runtime e report JUnit XML (`junit.xml`)
 - `.agents/` — regole (`rules/`) e skill (`skills/`) per coding agent
 
-## Autore & Licenza
+## Autore, Contributi & Licenza
 
 - **Autore**: Elpool95
+- **Contribuire**: leggi le linee guida in [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Sicurezza**: per segnalare vulnerabilità consulta [SECURITY.md](SECURITY.md) (e i dettagli tecnici in [doc/security.md](doc/security.md))
 - **Licenza**: [MIT License](LICENSE) — per l'elenco completo delle licenze di terze parti (`psutil` BSD-3-Clause, `google-genai` Apache-2.0, `pytest` MIT, ecc.) vedi [doc/licenses.md](doc/licenses.md).
