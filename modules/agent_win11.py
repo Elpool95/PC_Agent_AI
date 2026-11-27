@@ -522,18 +522,24 @@ class PCAgentGUI:
     def azione_gaming_locale(self):
         res_perf = tools.attiva_modalita_prestazioni()
         res_temp = tools.pulisci_file_temporanei()
-        checkup = tools.diagnostica_pre_partita(self.ram_info_hw)
+        checkup = tools.diagnostica_pre_partita(self.ram_info_hw, self.dischi_info_hw or None)
         self.root.after(0, self._imposta_stato_modalita, "gaming")
         self.root.after(0, self.aggiungi_testo, "Sistema", f"{res_perf}\n{res_temp}\n{checkup['testo']}\n")
 
         attivi = tools.servizi_gaming_attivi()
+        hdd_list = checkup.get("hdd_rilevati") or []
+        hdd_note = (
+            f"Rilevato disco meccanico HDD ({', '.join(f'{l}:' for l in hdd_list)}) con Windows Search attivo: "
+            "arrestare WSearch riduce drasticamente i picchi di disco e CPU.\n\n"
+            if (hdd_list and "WSearch" in attivi) else ""
+        )
         if not attivi:
             self.root.after(
                 0, self.aggiungi_testo, "Sistema",
                 f"Servizi background ({', '.join(config.GAMING_PAUSABLE_SERVICES)}): già tutti in pausa ●.\n"
             )
         elif self._chiedi_conferma_utente(
-            f"Vuoi mettere in pausa temporaneamente i servizi background di Windows ({', '.join(attivi)}) "
+            f"{hdd_note}Vuoi mettere in pausa temporaneamente i servizi background di Windows ({', '.join(attivi)}) "
             "per ridurre picchi disco e micro-stutter?\n\nRichiederà conferma UAC e verranno riavviati su 'Balance'."
         ):
             res_svc = tools.pausa_servizi_gaming(attivi)
@@ -617,6 +623,37 @@ class PCAgentGUI:
                 self.root.after(
                     0, self.aggiungi_testo, "Sistema",
                     "PhysX NVIDIA lasciato su 'Selezione automatica' ○.\n"
+                )
+
+        vbs_attivo = checkup.get("vbs_hvci_attivo")
+        if vbs_attivo is False:
+            self.root.after(
+                0, self.aggiungi_testo, "Sistema",
+                "Integrità della memoria (VBS / Isolamento core): OFF ●.\n"
+            )
+        elif vbs_attivo is True:
+            if self._chiedi_conferma_utente(
+                "Integrità della memoria (Isolamento core / VBS) è attualmente attiva.\n\n"
+                "Disattivarla può recuperare FPS e ridurre la latenza (soprattutto su CPU meno recenti), "
+                "ma abbassa leggermente la protezione da malware avanzati e richiede un riavvio.\n\n"
+                "Vuoi aprire ora Sicurezza di Windows > Isolamento core per valutarla?"
+            ):
+                if tools.apri_isolamento_core_windows():
+                    self.root.after(
+                        0, self.aggiungi_testo, "Sistema",
+                        "Sicurezza di Windows > Isolamento core aperto: valuta 'Integrità della memoria' "
+                        "e riavvia il PC se scegli di modificarla.\n"
+                    )
+                else:
+                    self.root.after(
+                        0, self.aggiungi_testo, "Sistema",
+                        "Impossibile aprire automaticamente Isolamento core: vai in Sicurezza di Windows > "
+                        "Sicurezza dispositivi > Isolamento core.\n"
+                    )
+            else:
+                self.root.after(
+                    0, self.aggiungi_testo, "Sistema",
+                    "Integrità della memoria (VBS / Isolamento core) lasciata attiva su scelta utente ○.\n"
                 )
 
         self._aggiorna_barra_gaming_async()

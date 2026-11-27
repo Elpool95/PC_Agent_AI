@@ -24,17 +24,17 @@ Su PC con componenti non più recentissimi ogni singolo ciclo di CPU, picco di I
   - **Dischi & Salute S.M.A.R.T.**: rilevamento automatico di tutte le unità montate, spazio libero, velocità `R/W MB/s`, **temperatura `°C`** (soglie differenziate SSD vs HDD) e **stato salute stile CrystalDiskInfo** (`Good %`, `Caution`, `Bad`) con avvisi colore per singolo disco.
   - **GPU NVIDIA**: utilizzo `%`, temperatura `°C`, VRAM, consumo `W`, ventole `%` e frequenza Core `MHz` *(tramite `nvidia-smi`)*.
   - **Rete**: interfaccia attiva, link speed, IP locale, traffico `↓ / ↑` live e `Ping` verso `1.1.1.1`.
-  - **Riga live Gaming Status**: indicatori immediati in tempo reale per `FPS Cap`, `Servizi BG`, `HAGS`, `DLDSR` e `PhysX`.
+  - **Riga live Gaming Status**: indicatori immediati in tempo reale per `FPS Cap`, `Servizi BG`, `HAGS`, `DLDSR`, `PhysX` e `VBS/CoreIso`.
   - **Footer di sistema**: versione di Windows e versione del driver grafico installato.
 - **Azioni rapide locali**:
   - `Top Process`: mostra i Top 5 processi per CPU e i Top 5 per RAM.
   - `Storage`: report dettagliato stile *CrystalDiskInfo* (modello, interfaccia, salute S.M.A.R.T., temperatura, ore di accensione, GB/TB scritti) e analisi delle principali cache/cartelle pesanti su `C:`.
   - `Gaming Mode` / `Balance`:
     - Attiva il piano *Prestazioni eccellenti* con tuning `powercfg` (USB Suspend OFF, PCIe Power Mgmt OFF, Disk Standby OFF, CPU Core Unpark 100%).
-    - Applica ottimizzazioni Windows HKCU senza UAC (Game Mode ON, Game DVR OFF, Notifiche/Trasparenze DWM/Animazioni UI OFF, VRR & Windowed Opt ON).
+    - Applica ottimizzazioni Windows HKCU senza UAC (Game Mode ON, Game DVR OFF, Notifiche Toast / Non Disturbare / Suoni Notifiche OFF, Trasparenze DWM / Animazioni UI OFF, VRR & Windowed Opt ON).
     - Imposta automaticamente il **Limite FPS NVIDIA (`Max Frame Rate`)** via `NVAPI DRS` (senza UAC) in base al refresh rate del monitor principale (`Hz - 3`), ripristinandolo su `Balance`.
-    - Chiude in sicurezza le app background non protette, abbassa a `BELOW_NORMAL` la priorità di app tenute aperte (es. Discord, SteamWebHelper) e di PC Agent AI stesso, pulisce i file temporanei e propone la pausa temporanea dei servizi Windows pesanti (`WSearch`, `SysMain`, `DiagTrack` via UAC).
-    - Esegue un **Check-up pre-partita** su HAGS, VRR, PhysX (percorso DCH), DLDSR su sistemi CPU-bound, rete/ping, dischi, temperature e RAM, con feedback esplicito in console su ogni scelta.
+    - Chiude in sicurezza browser, app background non protette e overlay superflui (`GameBar`, `Overwolf`, `NVIDIA Share/Overlay`, `Medal`), abbassa a `BELOW_NORMAL` la priorità di app e launcher secondari tenuti aperti (es. Discord, SteamWebHelper, Epic, EA App, Ubisoft, Battle.net, GOG, Xbox) e di PC Agent AI stesso, pulisce i file temporanei e propone la pausa temporanea dei servizi Windows pesanti (`WSearch`, `SysMain`, `DiagTrack` via UAC, segnalando in particolare `WSearch` in presenza di dischi meccanici HDD).
+    - Esegue un **Check-up pre-partita** su HAGS, VRR, PhysX (percorso DCH), **VBS / Integrità della memoria (Isolamento core)** con apertura guidata in Sicurezza di Windows, DLDSR su sistemi CPU-bound, dischi HDD con indicizzazione attiva, launcher secondari, rete/ping, spazio dischi, temperature e RAM, con feedback esplicito in console su ogni scelta.
   - `Start App`: elenca le applicazioni all'avvio automatico di Windows.
   - `RAM Detail`: report completo su RAM fisica, paging e moduli installati.
   - `Lock LHM`: verifica l'esposizione sulla LAN della porta `8085` di LibreHardwareMonitor e la blocca via Windows Firewall mantenendo attivo `localhost`.

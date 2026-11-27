@@ -13,7 +13,7 @@ import psutil
 from config.settings import (
     SAFE_TO_CLOSE, PROTECTED_PROCESSES, NO_WINDOW,
     DISK_CRIT, GPU_TEMP_WARN, GAMING_PAUSABLE_SERVICES,
-    GAMING_THROTTLE_PROCESSES,
+    GAMING_THROTTLE_PROCESSES, GAMING_OPTIONAL_LAUNCHERS,
     GAMING_STATE_FILE, TELEMETRY_INTERVAL_NORMAL, TELEMETRY_INTERVAL_GAMING,
     FPS_CAP_MARGIN_HZ, FPS_CAP_MIN,
     DISK_TEMP_WARN_HDD, DISK_TEMP_CRIT_HDD, DISK_TEMP_WARN_SSD, DISK_TEMP_CRIT_SSD,
@@ -1008,6 +1008,8 @@ _GAMING_REG_SETTINGS = (
     ("Game DVR OFF", r"Software\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", 0),
     ("Game DVR Store OFF", r"System\GameConfigStore", "GameDVR_Enabled", 0),
     ("Notifiche Toast OFF", r"Software\Microsoft\Windows\CurrentVersion\PushNotifications", "ToastEnabled", 0),
+    ("Non Disturbare ON", r"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings", "NOC_GLOBAL_SETTING_TOASTS_ENABLED", 0),
+    ("Suoni Notifiche OFF", r"Software\Microsoft\Windows\CurrentVersion\Notifications\Settings", "NOC_GLOBAL_SETTING_ALLOW_NOTIFICATION_SOUND", 0),
     ("Trasparenze DWM OFF", r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 0),
     ("Effetti Visivi Ridotti", r"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects", "VisualFXSetting", 2),
 )
@@ -1671,6 +1673,8 @@ def stato_ottimizzazioni_gaming() -> dict:
 
     hags = _leggi_hags_attivo()
     physx_auto = _leggi_physx_auto()
+    vbs_info = _leggi_stato_vbs_hvci()
+    vbs_on = vbs_info.get("attivo")
     mon = info_monitor_principale()
     dldsr_on = bool(mon.get("dldsr_attivo", False))
     dldsr_res = mon.get("risoluzioni_dldsr", [])
@@ -1690,6 +1694,7 @@ def stato_ottimizzazioni_gaming() -> dict:
     else:
         dldsr_txt = "DLDSR: OFF ○"
     physx_txt = "PhysX: GPU ●" if physx_auto is False else ("PhysX: Auto ○" if physx_auto is True else "PhysX: N/D")
+    vbs_txt = "VBS/CoreIso: OFF ●" if vbs_on is False else ("VBS/CoreIso: ON ○" if vbs_on is True else "VBS/CoreIso: N/D")
 
     attivi_count = sum([
         bool(fps_cap),
@@ -1697,6 +1702,7 @@ def stato_ottimizzazioni_gaming() -> dict:
         hags is True,
         dldsr_on,
         physx_auto is False,
+        vbs_on is False,
     ])
     colore = "#81c784" if attivi_count >= 3 else ("#ffb74d" if attivi_count >= 1 else "#9e9e9e")
 
@@ -1706,9 +1712,12 @@ def stato_ottimizzazioni_gaming() -> dict:
         "servizi_attivi": attivi,
         "hags": hags,
         "physx_auto": physx_auto,
+        "vbs_attivo": vbs_info.get("vbs_attivo"),
+        "hvci_attivo": vbs_info.get("hvci_attivo"),
+        "vbs_hvci_attivo": vbs_on,
         "dldsr_attivo": dldsr_on,
         "risoluzioni_dldsr": dldsr_res,
-        "testo_barra": f"Gaming: {fps_txt} | {svc_txt} | {hags_txt} | {dldsr_txt} | {physx_txt}",
+        "testo_barra": f"Gaming: {fps_txt} | {svc_txt} | {hags_txt} | {dldsr_txt} | {physx_txt} | {vbs_txt}",
         "colore": colore,
     }
 
@@ -1815,11 +1824,73 @@ def _leggi_physx_auto() -> bool | None:
     return None
 
 
-def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
+def _leggi_stato_vbs_hvci() -> dict:
+    """Legge lo stato di VBS e Integrità della memoria (HVCI / Core Isolation) dal registro HKLM (sola lettura, zero UAC)."""
+    hvci: bool | None = False
+    vbs: bool | None = False
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity",
+            0, winreg.KEY_READ,
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, "Enabled")
+            hvci = int(val) == 1
+    except FileNotFoundError:
+        hvci = False
+    except Exception:
+        hvci = None
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\DeviceGuard",
+            0, winreg.KEY_READ,
+        ) as key:
+            val, _ = winreg.QueryValueEx(key, "EnableVirtualizationBasedSecurity")
+            vbs = int(val) == 1
+    except FileNotFoundError:
+        vbs = False
+    except Exception:
+        vbs = None
+
+    if hvci is None and vbs is None:
+        attivo: bool | None = None
+    else:
+        attivo = bool(hvci) or bool(vbs)
+    return {"vbs_attivo": vbs, "hvci_attivo": hvci, "attivo": attivo}
+
+
+def apri_isolamento_core_windows() -> bool:
+    """Apre direttamente Sicurezza di Windows > Sicurezza dispositivi > Isolamento core senza shell."""
+    try:
+        subprocess.Popen(
+            ["explorer.exe", "windowsdefender://coreisolation"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NO_WINDOW,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _launcher_opzionali_attivi() -> list[str]:
+    """Rileva eventuali launcher secondari aperti in background (es. Epic, EA App, Ubisoft, Battle.net, GOG, Xbox)."""
+    trovati = set()
+    for p in psutil.process_iter(['name']):
+        try:
+            nome = p.info.get('name') or ""
+            if nome.lower() in GAMING_OPTIONAL_LAUNCHERS:
+                trovati.add(nome)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            pass
+    return sorted(trovati)
+
+
+def diagnostica_pre_partita(ram_info: dict | None = None, dischi_info: dict | None = None) -> dict:
     """Esegue un check-up rapido (sola lettura, zero UAC) segnalando solo eventuali colli di bottiglia reali."""
     avvisi = []
 
-    # 1. HAGS (Hardware-Accelerated GPU Scheduling), VRR Windows e PhysX NVIDIA
+    # 1. HAGS (Hardware-Accelerated GPU Scheduling), VRR Windows, PhysX NVIDIA e VBS / Core Isolation
     hags = _leggi_hags_attivo()
     if hags is False:
         avvisi.append("HAGS non attivo: abilitalo in Impostazioni > Schermo > Grafica per ridurre la latenza GPU.")
@@ -1830,6 +1901,15 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
 
     if _leggi_physx_auto() is True:
         avvisi.append("PhysX NVIDIA è su 'Selezione automatica': imposta la GPU NVIDIA nel Pannello di Controllo NVIDIA > Configura Surround, PhysX.")
+
+    vbs_info = _leggi_stato_vbs_hvci()
+    vbs_hvci_attivo = vbs_info.get("attivo")
+    if vbs_hvci_attivo is True:
+        avvisi.append(
+            "Integrità della memoria (Isolamento core / VBS) attiva: su CPU meno recenti può ridurre gli FPS "
+            "e aumentare la latenza. Valuta di disattivarla in Sicurezza di Windows > Sicurezza dispositivi > "
+            "Isolamento core (abbassa leggermente la protezione da malware avanzati, richiede riavvio)."
+        )
 
     # 2. Rete (Wi-Fi / Offline / Ping alto)
     rete = info_rete_attiva()
@@ -1843,7 +1923,7 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
         if ping.get("ms") is not None and ping["ms"] >= 50:
             avvisi.append(f"Ping elevato verso 1.1.1.1 ({ping['stato']}): possibile congestione di rete.")
 
-    # 3. Spazio critico su C:
+    # 3. Spazio critico su C: e dischi meccanici HDD con Windows Search attivo
     try:
         uso_c = psutil.disk_usage("C:\\")
         if uso_c.percent >= DISK_CRIT:
@@ -1851,6 +1931,18 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
             avvisi.append(f"Disco C: quasi pieno ({uso_c.percent}%, {liberi_gb} GB liberi): gli SSD rallentano oltre il {DISK_CRIT}%.")
     except Exception:
         pass
+
+    info_dischi = dischi_info if dischi_info is not None else mappa_info_dischi_fisici()
+    hdd_rilevati = sorted(
+        lettera for lettera, info in (info_dischi or {}).items()
+        if str(info.get("tipo", "")).upper() == "HDD"
+    )
+    if hdd_rilevati and _stato_servizi_dettaglio(("WSearch",)).get("WSearch") == "running":
+        hdd_str = ", ".join(f"{l}:" for l in hdd_rilevati)
+        avvisi.append(
+            f"Disco meccanico HDD rilevato ({hdd_str}) con Windows Search (WSearch) attivo: "
+            "mettere in pausa l'indicizzazione riduce drasticamente i picchi di disco e CPU."
+        )
 
     # 4. Temperature GPU / CPU già alte prima di iniziare
     gpu = monitora_gpu()
@@ -1868,7 +1960,7 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
         except ValueError:
             pass
 
-    # 5. RAM (Single Channel o frequenza base JEDEC / XMP spento)
+    # 5. RAM (Single Channel o frequenza base JEDEC / XMP spento) e launcher secondari aperti
     ram_hw = ram_info if (ram_info and ram_info.get("banchi")) else info_banchi_ram()
     if ram_hw.get("modalita_canale") == "Single Channel":
         avvisi.append("RAM in Single Channel: il Dual Channel migliora sensibilmente gli 1% low.")
@@ -1876,6 +1968,13 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
     freq_ram = ram_hw.get("frequenza_mhz", 0) or 0
     if (tipo_ram == "DDR4" and 0 < freq_ram <= 2133) or (tipo_ram == "DDR5" and 0 < freq_ram <= 4800):
         avvisi.append(f"RAM {tipo_ram} a {freq_ram} MHz (frequenza base): verifica se XMP/EXPO è attivo nel BIOS.")
+
+    launcher_opz = _launcher_opzionali_attivi()
+    if launcher_opz:
+        avvisi.append(
+            f"Launcher secondari aperti in background ({', '.join(launcher_opz)}): "
+            "priorità ridotta a BELOW_NORMAL; chiudi quelli non necessari per questa sessione."
+        )
 
     # 6. Bilanciamento CPU-bound / DLDSR su GPU NVIDIA RTX con margine di risoluzione
     consiglia_dldsr = None
@@ -1916,6 +2015,9 @@ def diagnostica_pre_partita(ram_info: dict | None = None) -> dict:
         "consiglia_dldsr": consiglia_dldsr,
         "dldsr_attivo": bool(mon.get("dldsr_attivo", False)),
         "risoluzioni_dldsr": mon.get("risoluzioni_dldsr", []),
+        "vbs_hvci_attivo": vbs_hvci_attivo,
+        "hdd_rilevati": hdd_rilevati,
+        "launcher_opzionali_attivi": launcher_opz,
     }
 
 def pulisci_file_temporanei() -> str:

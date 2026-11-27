@@ -58,13 +58,17 @@ TELEMETRY_INTERVAL_GAMING = 2.5
 FPS_CAP_MARGIN_HZ = 3
 FPS_CAP_MIN = 30
 
-# Processi sicuri da chiudere in Modalità Gaming
+# Processi sicuri da chiudere in Modalità Gaming (browser, cloud, chat, widget, overlay superflui)
 SAFE_TO_CLOSE = [
-    "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe",
+    "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe", "vivaldi.exe",
     "onedrive.exe", "googledrivesync.exe", "dropbox.exe",
     "spotify.exe", "teams.exe", "ms-teams.exe", "slack.exe",
     "widgets.exe", "widgetservice.exe", "phoneexperiencehost.exe", "yourphone.exe",
     "ccxprocess.exe", "adobe desktop service.exe",
+    "gamebar.exe", "gamebarftserver.exe",
+    "overwolf.exe", "overwolfbrowser.exe",
+    "nvidia share.exe", "nvidia overlay.exe",
+    "medal.exe", "medalencoder.exe",
 ]
 
 # Processi PROTETTI che non verranno MAI chiusi
@@ -78,11 +82,22 @@ PROTECTED_PROCESSES = {
 # Servizi Windows non essenziali mettibili temporaneamente in pausa in Gaming Mode (allowlist fissa)
 GAMING_PAUSABLE_SERVICES = ("WSearch", "SysMain", "DiagTrack")
 
+# Launcher secondari segnalati nel check-up pre-partita e messi a priorità ridotta (non chiusi forzatamente)
+GAMING_OPTIONAL_LAUNCHERS = (
+    "epicgameslauncher.exe",
+    "eadesktop.exe",
+    "upc.exe",
+    "battle.net.exe",
+    "galaxyclient.exe",
+    "xboxpcapp.exe",
+)
+
 # Processi background tenuti aperti in Gaming Mode ma impostati a priorità CPU ridotta (mai anti-cheat, Riot o sistema)
 GAMING_THROTTLE_PROCESSES = {
     "steamwebhelper.exe",
     "discord.exe",
     "epicwebhelper.exe",
+    *GAMING_OPTIONAL_LAUNCHERS,
 }
 
 NO_WINDOW = subprocess.CREATE_NO_WINDOW

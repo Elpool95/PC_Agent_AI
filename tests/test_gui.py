@@ -218,7 +218,11 @@ def test_gui_local_actions_and_chat_flow(gui_app):
     with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap 72 ●", "colore": "#81c784"}), \
          patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \
          patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"), \
-         patch("modules.tools.diagnostica_pre_partita", return_value={"ok": True, "avvisi": [], "testo": "Check-up OK", "consiglia_dldsr": None, "dldsr_attivo": True, "risoluzioni_dldsr": ["3413x1440"]}), \
+         patch("modules.tools.diagnostica_pre_partita", return_value={
+             "ok": True, "avvisi": [], "testo": "Check-up OK", "consiglia_dldsr": None,
+             "dldsr_attivo": True, "risoluzioni_dldsr": ["3413x1440"],
+             "vbs_hvci_attivo": False, "hdd_rilevati": ["D"], "launcher_opzionali_attivi": [],
+         }), \
          patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
          patch("modules.tools._leggi_hags_attivo", return_value=False), \
          patch("modules.tools._leggi_physx_auto", return_value=False), \
@@ -234,16 +238,18 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         assert "HAGS abilitato OK" in txt
         assert "DLDSR: ATTIVO ●" in txt
         assert "PhysX NVIDIA: GPU dedicata ●" in txt
+        assert "VBS / Isolamento core): OFF ●" in txt
         assert "FPS Cap 72 ●" in app.lbl_gaming_status.cget("text")
 
-    # Feedback esplicito su scelta 'No' per Servizi, HAGS, DLDSR e PhysX
+    # Feedback esplicito su scelta 'No' per Servizi, HAGS, DLDSR, PhysX e VBS/Core Isolation
     with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap 72 ● | DLDSR: OFF ○", "colore": "#ffb74d"}), \
          patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \
          patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"), \
          patch("modules.tools.diagnostica_pre_partita", return_value={
-             "ok": False, "avvisi": ["DLDSR"], "testo": "Check-up WARN",
+             "ok": False, "avvisi": ["DLDSR", "VBS"], "testo": "Check-up WARN",
              "consiglia_dldsr": {"nativa": "2560x1080", "res_178": "3413x1440", "res_225": "3840x1620"},
-             "dldsr_attivo": False, "risoluzioni_dldsr": []
+             "dldsr_attivo": False, "risoluzioni_dldsr": [],
+             "vbs_hvci_attivo": True, "hdd_rilevati": [], "launcher_opzionali_attivi": [],
          }), \
          patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
          patch("modules.tools._leggi_hags_attivo", return_value=False), \
@@ -256,6 +262,7 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         assert "HAGS lasciato disattivo" in txt_no
         assert "DLDSR lasciato disattivo" in txt_no
         assert "PhysX NVIDIA lasciato su 'Selezione automatica'" in txt_no
+        assert "VBS / Isolamento core) lasciata attiva" in txt_no
 
     with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap OFF ○", "colore": "#9e9e9e"}), \
          patch("modules.tools.ripristina_modalita_bilanciata", return_value="Bil OK"), \
