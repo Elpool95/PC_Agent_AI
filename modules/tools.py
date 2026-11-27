@@ -249,7 +249,8 @@ def _estrai_sensori_dischi_lhm(nodo, risultati=None) -> dict:
 def leggi_sensori_lhm() -> dict:
     """Legge in una sola chiamata HTTP a LibreHardwareMonitor sia i sensori CPU/ventole sia temperature/S.M.A.R.T. dei dischi."""
     try:
-        with urllib.request.urlopen("http://localhost:8085/data.json", timeout=0.4) as resp:
+        # URL locale fisso http://localhost:8085/data.json (nessun input utente)
+        with urllib.request.urlopen("http://localhost:8085/data.json", timeout=0.4) as resp:  # nosec B310
             dati = json.loads(resp.read().decode("utf-8"))
             temp = _cerca_temp_cpu(dati) or "N/D"
             watt = _cerca_potenza_cpu(dati, "CPU Package") or _cerca_potenza_cpu(dati, "CPU Cores") or "N/D"
@@ -1810,7 +1811,8 @@ def stato_sicurezza_lhm() -> dict:
         except Exception:
             pass
 
-    esposto_lan = any(ip in ("0.0.0.0", "::", "") for ip in listen_addrs)
+    # Controllo difensivo per rilevare esposizione su LAN (nessun bind socket)
+    esposto_lan = any(ip in ("0.0.0.0", "::", "") for ip in listen_addrs)  # nosec B104
     protetto_fw = False
     try:
         res = subprocess.run(

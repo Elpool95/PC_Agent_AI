@@ -36,16 +36,20 @@ python .agents/skills/skill-evaluator/scripts/evaluate_skills.py
 
 ---
 
-## 2. SAST (Static Application Security Testing)
+## 2. SAST (Static Application Security Testing — Bandit AST)
 
-Analisi statica eseguita su `config/settings.py`, `modules/tools.py`, `modules/ai_agent.py`, `modules/agent_win11.py` e sui file tracciati da Git (`git ls-files`):
+Analisi statica AST eseguita con **Bandit (`bandit>=1.7.0`)** su `config/` e `modules/` (`2.413` righe di codice) + verifica file tracciati su Git (`git ls-files`):
+```powershell
+.\.venv\Scripts\python.exe -m bandit -r config modules -ll
+```
 
 | Controllo SAST | Esito | Evidenza |
 | :--- | :---: | :--- |
+| **Bandit — Severità High** | **PASS (0 issue)** | Nessuna vulnerabilità critica/alta su 2.413 LoC |
+| **Bandit — Severità Medium** | **PASS (0 reali)** | 2 falsi positivi verificati e documentati con `# nosec`: `B310` su URL locale fisso `http://localhost:8085/data.json` e `B104` su controllo difensivo di `0.0.0.0` in `stato_sicurezza_lhm()` |
 | `subprocess` con `shell=True` | **PASS (0 hit)** | Tutte le chiamate usano liste di argomenti esplicite e `creationflags=NO_WINDOW` |
 | Funzioni pericolose (`eval`, `exec`, `pickle`, `os.system`) | **PASS (0 hit)** | Nessuna occorrenza rilevata |
 | Segreti / API Key / file sensibili in Git | **PASS (0 hit)** | `.env`, `config/.env`, `.venv/`, `reports/*.log`, `reports/gaming_state.json` esclusi in `.gitignore` |
-| Percorsi utente personali hardcoded | **PASS (0 hit)** | Rilevamento dinamico a runtime (unico match è un esempio in docstring `C:\Users\Nome` in `maschera_percorso_utente`) |
 | Timeout obbligatori su chiamate esterne | **PASS** | Timeout espliciti su `subprocess` (`3s–10s`), `urllib` LHM (`0.4s`) e client Gemini (`30s`) |
 
 ---
