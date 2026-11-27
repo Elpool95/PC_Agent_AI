@@ -17,9 +17,9 @@ python -m pytest -c config/pytest.ini --rootdir=. tests/test_gui.py -v --no-cov
 ```
 Controllano automaticamente:
 - **Layout & Visibilità**: `footer_frame` e `input_frame` ancorati in basso (`side=bottom`), mai tagliati dalla finestra minima (`820x620`) né da quella predefinita (`900x760`).
-- **Etichette pulsanti**: presenza e coerenza dei pulsanti (`Top Process`, `Storage`, `Gaming Mode`, `Balance`, `Start App`, `RAM Detail`, `Clear`, `Send`).
+- **Etichette pulsanti**: presenza e coerenza dei pulsanti (`Top Process`, `Storage`, `Gaming Mode`, `Balance`, `Start App`, `RAM Detail`, `Lock LHM`, `Clear`, `Send`).
 - **Colori per singolo disco**: un disco critico (`>= 90%`) è rosso (`#ff5252`), uno in warning (`>= 80%`) arancione (`#ffb74d`), gli altri restano viola (`#ce93d8`).
-- **Azioni utente**: `Clear` svuota la console, `Gaming Mode` / `Balance` aggiornano lo stato visivo `● ACTIVE`, invio messaggio vuoto non invia chiamate API.
+- **Azioni utente & Sicurezza HITL**: `Clear` svuota la console, `Gaming Mode` / `Balance` aggiornano lo stato `●`, `Lock LHM` aggiorna lo stato `Lock LHM !` / `LHM Locked ●`, il popup di conferma nativo blocca azioni sensibili se rifiutate e l'invio di un messaggio vuoto non invia chiamate API.
 
 ## 2. Checklist UX manuale (dopo avvio con `avvia_agent.bat`)
 1. **Avvio istantaneo**: la finestra si apre in < 1 secondo anche offline o con LibreHardwareMonitor spento.

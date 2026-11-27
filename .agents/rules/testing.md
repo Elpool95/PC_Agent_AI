@@ -18,3 +18,11 @@ Ogni volta che si sviluppa una nuova funzionalità, un task o un bugfix in quest
    - Il report JUnit XML sia rigenerato correttamente in `reports/junit.xml`.
    - La copertura totale resti **`>= 80%`** su `config` e `modules`.
 3. Non dichiarare mai completato un task o un fix con test falliti o copertura sotto l'80%.
+
+## 3. Quality Gate per le Skill (`.agents/skills/`)
+- Ogni volta che si crea o modifica una skill in `.agents/skills/`, è obbligatorio:
+  1. Eseguire lo script di valutazione automatica:
+     ```bash
+     python .agents/skills/skill-evaluator/scripts/evaluate_skills.py
+     ```
+  2. Verificare che la skill superi la soglia (0 errori/warning bloccanti) e rivederla per migliorarne chiarezza, triggerability della `description`, aderenza ai file reali del progetto e criteri di verifica.

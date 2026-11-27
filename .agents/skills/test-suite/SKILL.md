@@ -32,6 +32,11 @@ pip install -r requirements-dev.txt
    - Generazione del report standard JUnit in `reports/junit.xml`
    - Verifica della soglia minima di copertura **`>= 80%`** su `config` e `modules`
 
-3. **Analisi del risultato**:
+3. **Verifica delle skill (se modificate)**:
+   ```bash
+   python .agents/skills/skill-evaluator/scripts/evaluate_skills.py
+   ```
+
+4. **Analisi del risultato**:
    - Se la coverage scende sotto l'80%, individuare le righe scoperte nella colonna `Missing` e aggiungere i test mancanti in `tests/`.
    - Verificare che `reports/junit.xml` riporti `failures="0"` e `errors="0"`.
