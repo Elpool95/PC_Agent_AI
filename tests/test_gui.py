@@ -198,6 +198,7 @@ def test_gui_local_actions_and_chat_flow(gui_app):
          patch("modules.tools.diagnostica_pre_partita", return_value={"ok": True, "avvisi": [], "testo": "Check-up OK", "consiglia_dldsr": None, "dldsr_attivo": True, "risoluzioni_dldsr": ["3413x1440"]}), \
          patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
          patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch("modules.tools._leggi_physx_auto", return_value=False), \
          patch.object(app, "_chiedi_conferma_utente", return_value=True), \
          patch("modules.tools.pausa_servizi_gaming", return_value="Servizi in pausa OK"), \
          patch("modules.tools.abilita_hags", return_value="HAGS abilitato OK"):
@@ -209,9 +210,10 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         assert "Servizi in pausa OK" in txt
         assert "HAGS abilitato OK" in txt
         assert "DLDSR: ATTIVO ●" in txt
+        assert "PhysX NVIDIA: GPU dedicata ●" in txt
         assert "FPS Cap 72 ●" in app.lbl_gaming_status.cget("text")
 
-    # Feedback esplicito su scelta 'No' per Servizi, HAGS e DLDSR
+    # Feedback esplicito su scelta 'No' per Servizi, HAGS, DLDSR e PhysX
     with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap 72 ● | DLDSR: OFF ○", "colore": "#ffb74d"}), \
          patch("modules.tools.attiva_modalita_prestazioni", return_value="Perf OK"), \
          patch("modules.tools.pulisci_file_temporanei", return_value="Temp OK"), \
@@ -222,6 +224,7 @@ def test_gui_local_actions_and_chat_flow(gui_app):
          }), \
          patch("modules.tools.servizi_gaming_attivi", return_value=["WSearch"]), \
          patch("modules.tools._leggi_hags_attivo", return_value=False), \
+         patch("modules.tools._leggi_physx_auto", return_value=True), \
          patch.object(app, "_chiedi_conferma_utente", return_value=False):
         app.azione_gaming_locale()
         root.update()
@@ -229,6 +232,7 @@ def test_gui_local_actions_and_chat_flow(gui_app):
         assert "Servizi background lasciati attivi" in txt_no
         assert "HAGS lasciato disattivo" in txt_no
         assert "DLDSR lasciato disattivo" in txt_no
+        assert "PhysX NVIDIA lasciato su 'Selezione automatica'" in txt_no
 
     with patch("modules.tools.stato_ottimizzazioni_gaming", return_value={"testo_barra": "Gaming: FPS Cap OFF ○", "colore": "#9e9e9e"}), \
          patch("modules.tools.ripristina_modalita_bilanciata", return_value="Bil OK"), \

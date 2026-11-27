@@ -1267,6 +1267,7 @@ def stato_ottimizzazioni_gaming() -> dict:
     attivi = [s for s, st in stati_svc.items() if st == "running"]
 
     hags = _leggi_hags_attivo()
+    physx_auto = _leggi_physx_auto()
     mon = info_monitor_principale()
     dldsr_on = bool(mon.get("dldsr_attivo", False))
     dldsr_res = mon.get("risoluzioni_dldsr", [])
@@ -1285,12 +1286,14 @@ def stato_ottimizzazioni_gaming() -> dict:
         dldsr_txt = f"DLDSR: ON ({prima_res}) ●"
     else:
         dldsr_txt = "DLDSR: OFF ○"
+    physx_txt = "PhysX: GPU ●" if physx_auto is False else ("PhysX: Auto ○" if physx_auto is True else "PhysX: N/D")
 
     attivi_count = sum([
         bool(fps_cap),
         len(in_pausa) > 0,
         hags is True,
         dldsr_on,
+        physx_auto is False,
     ])
     colore = "#81c784" if attivi_count >= 3 else ("#ffb74d" if attivi_count >= 1 else "#9e9e9e")
 
@@ -1299,9 +1302,10 @@ def stato_ottimizzazioni_gaming() -> dict:
         "servizi_in_pausa": in_pausa,
         "servizi_attivi": attivi,
         "hags": hags,
+        "physx_auto": physx_auto,
         "dldsr_attivo": dldsr_on,
         "risoluzioni_dldsr": dldsr_res,
-        "testo_barra": f"Gaming: {fps_txt}  |  {svc_txt}  |  {hags_txt}  |  {dldsr_txt}",
+        "testo_barra": f"Gaming: {fps_txt} | {svc_txt} | {hags_txt} | {dldsr_txt} | {physx_txt}",
         "colore": colore,
     }
 

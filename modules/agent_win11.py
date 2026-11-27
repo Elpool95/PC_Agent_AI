@@ -519,6 +519,36 @@ class PCAgentGUI:
                 f"DLDSR: ATTIVO ● (risoluzioni disponibili: {res_list}).\n"
             )
 
+        physx_auto = tools._leggi_physx_auto()
+        if physx_auto is False:
+            self.root.after(
+                0, self.aggiungi_testo, "Sistema",
+                "PhysX NVIDIA: GPU dedicata ●.\n"
+            )
+        elif physx_auto is True:
+            if not dldsr_tip and self._chiedi_conferma_utente(
+                "PhysX NVIDIA è attualmente su 'Selezione automatica'.\n"
+                "Impostare la GPU dedicata evita che alcuni giochi scarichino la fisica sulla CPU.\n\n"
+                "Vuoi aprire ora il Pannello di Controllo NVIDIA (Configura Surround, PhysX)?"
+            ):
+                if tools.apri_pannello_nvidia():
+                    self.root.after(
+                        0, self.aggiungi_testo, "Sistema",
+                        "Pannello di Controllo NVIDIA aperto: vai su 'Configura Surround, PhysX' "
+                        "e seleziona la tua GPU NVIDIA dedicata, poi clicca Applica. "
+                        "Appena applicato, la barra Gaming mostrerà 'PhysX: GPU ●'.\n"
+                    )
+                else:
+                    self.root.after(
+                        0, self.aggiungi_testo, "Sistema",
+                        "Impossibile aprire automaticamente il Pannello di Controllo NVIDIA: aprilo dal menu Start > 'Configura Surround, PhysX'.\n"
+                    )
+            else:
+                self.root.after(
+                    0, self.aggiungi_testo, "Sistema",
+                    "PhysX NVIDIA lasciato su 'Selezione automatica' ○.\n"
+                )
+
         self._aggiorna_barra_gaming_async()
 
     def azione_bilanciato_locale(self):
