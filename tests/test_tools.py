@@ -229,32 +229,39 @@ def test_gaming_registro_hkcu_e_rollback(tmp_path):
     mock_key = MagicMock()
     mock_key.__enter__.return_value = mock_key
 
-    # Prima chiave esisteva (=1), le altre non esistevano (FileNotFoundError)
-    query_side = [(1, 4), FileNotFoundError(), FileNotFoundError(), (1, 4)]
+    # 3 chiavi esistevano, 4 non esistevano (FileNotFoundError)
+    query_side = [(1, 4), FileNotFoundError(), FileNotFoundError(), FileNotFoundError(), (1, 4), (1, 4), FileNotFoundError()]
     with patch("modules.tools.GAMING_STATE_FILE", state_file), \
          patch("modules.tools.abilita_vrr_windows", return_value=True), \
+         patch("modules.tools._imposta_animazioni_ui", return_value=True) as mock_anim, \
          patch("winreg.CreateKeyEx", return_value=mock_key), \
          patch("winreg.QueryValueEx", side_effect=query_side), \
          patch("winreg.SetValueEx") as mock_set:
         applicati = tools.applica_ottimizzazioni_registro_gaming()
-    assert len(applicati) == 5
+    assert len(applicati) == 9
+    assert "Trasparenze DWM OFF" in applicati
+    assert "Effetti Visivi Ridotti" in applicati
+    assert "Animazioni UI OFF" in applicati
     assert "VRR & Windowed Opt ON" in applicati
-    assert mock_set.call_count == 4
-    assert len(tools._GAMING_REG_SNAPSHOT) == 4
+    mock_anim.assert_called_once_with(False)
+    assert mock_set.call_count == 7
+    assert len(tools._GAMING_REG_SNAPSHOT) == 7
     assert os.path.isfile(state_file)
 
     # Simula chiusura e riapertura dell'app azzerando lo snapshot in RAM
     tools._GAMING_REG_SNAPSHOT.clear()
 
-    # Rollback da disco: 2 chiavi ripristinate con SetValueEx, 2 rimosse con DeleteValue
+    # Rollback da disco: 3 chiavi ripristinate con SetValueEx, 4 rimosse con DeleteValue
     with patch("modules.tools.GAMING_STATE_FILE", state_file), \
+         patch("modules.tools._imposta_animazioni_ui", return_value=True) as mock_anim_restore, \
          patch("winreg.OpenKey", return_value=mock_key), \
          patch("winreg.SetValueEx") as mock_restore_set, \
          patch("winreg.DeleteValue") as mock_restore_del:
         ripristinati = tools.ripristina_ottimizzazioni_registro_gaming()
-    assert ripristinati == 4
-    assert mock_restore_set.call_count == 2
-    assert mock_restore_del.call_count == 2
+    assert ripristinati == 7
+    assert mock_restore_set.call_count == 3
+    assert mock_restore_del.call_count == 4
+    mock_anim_restore.assert_called_once_with(True)
     assert len(tools._GAMING_REG_SNAPSHOT) == 0
     assert not os.path.exists(state_file)
 

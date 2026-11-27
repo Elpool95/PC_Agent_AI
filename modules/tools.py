@@ -598,9 +598,12 @@ _POWERCFG_GAMING_TWEAKS = (
 
 _GAMING_REG_SETTINGS = (
     ("Windows Game Mode ON", r"Software\Microsoft\GameBar", "AutoGameModeEnabled", 1),
+    ("Windows Game Mode Allow", r"Software\Microsoft\GameBar", "AllowAutoGameMode", 1),
     ("Game DVR OFF", r"Software\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", 0),
     ("Game DVR Store OFF", r"System\GameConfigStore", "GameDVR_Enabled", 0),
     ("Notifiche Toast OFF", r"Software\Microsoft\Windows\CurrentVersion\PushNotifications", "ToastEnabled", 0),
+    ("Trasparenze DWM OFF", r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 0),
+    ("Effetti Visivi Ridotti", r"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects", "VisualFXSetting", 2),
 )
 
 _GAMING_REG_SNAPSHOT: dict[tuple[str, str], tuple[bool, int | None]] = {}
@@ -709,6 +712,15 @@ def abilita_vrr_windows() -> bool:
         return False
 
 
+def _imposta_animazioni_ui(attive: bool) -> bool:
+    """Disattiva o riattiva le animazioni dell'area client di Windows via SystemParametersInfoW (senza UAC)."""
+    try:
+        # SPI_SETCLIENTAREAANIMATION = 0x1043, SPIF_SENDCHANGE = 0x0002
+        return bool(ctypes.windll.user32.SystemParametersInfoW(0x1043, 0, ctypes.c_void_p(1 if attive else 0), 0x0002))
+    except Exception:
+        return False
+
+
 def applica_ottimizzazioni_registro_gaming() -> list[str]:
     """Applica ottimizzazioni Windows Gaming su HKCU (senza UAC) salvando lo stato precedente anche su disco."""
     stato = _carica_gaming_state()
@@ -736,6 +748,9 @@ def applica_ottimizzazioni_registro_gaming() -> list[str]:
                 applicati.append(etichetta)
         except Exception:
             pass
+
+    if _imposta_animazioni_ui(False):
+        applicati.append("Animazioni UI OFF")
 
     if abilita_vrr_windows():
         applicati.append("VRR & Windowed Opt ON")
@@ -775,6 +790,7 @@ def ripristina_ottimizzazioni_registro_gaming() -> int:
         except Exception:
             pass
     _GAMING_REG_SNAPSHOT.clear()
+    _imposta_animazioni_ui(True)
     if "reg_snapshot" in stato:
         stato.pop("reg_snapshot", None)
         _salva_gaming_state(stato)
