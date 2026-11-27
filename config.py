@@ -1,8 +1,13 @@
 import subprocess
 
-# Modello Gemini e timeout (in millisecondi)
+# Modello Gemini principale, fallback automatici e timeout (in millisecondi)
 GEMINI_MODEL = "gemini-3.8-flash"
-GEMINI_TIMEOUT_MS = 60000
+GEMINI_FALLBACK_MODELS = [
+    "gemini-3.7-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+]
+GEMINI_TIMEOUT_MS = 30000
 
 # Soglie di allerta per la telemetria live
 CPU_WARN = 65

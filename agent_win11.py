@@ -426,8 +426,9 @@ class PCAgentGUI:
         threading.Thread(target=self._chiama_gemini, args=(testo,), daemon=True).start()
 
     def _chiama_gemini(self, testo):
-        def avvisa_retry(num):
-            self.root.after(0, self.aggiungi_testo, "Agent", f"Server occupato, nuovo tentativo {num}/3...")
+        def avvisa_retry(msg):
+            testo_msg = msg if isinstance(msg, str) else f"Server occupato, nuovo tentativo {msg}/3..."
+            self.root.after(0, self.aggiungi_testo, "Agent", testo_msg)
 
         if self.agent is None:
             self.agent = GeminiAgent()
