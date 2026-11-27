@@ -34,7 +34,7 @@ Assistente desktop per **Windows 10/11** con telemetria hardware in tempo reale,
 
 1. Scarica o clona questo repository:
    ```bash
-   git clone https://github.com/<tuo-utente>/PC_Agent_AI.git
+   git clone https://github.com/Elpool95/PC_Agent_AI.git
    cd PC_Agent_AI
    ```
 2. Fai doppio clic su **`install.bat`**:
@@ -55,7 +55,14 @@ Puoi modificare soglie di allerta, modelli Gemini, app chiudibili in `Gaming Mod
 
 ## Struttura del progetto
 
-- `config/` — configurazioni e soglie (`settings.py`)
+- `config/` — configurazioni, soglie e `pytest.ini` (`settings.py`, `.env.example`)
 - `modules/` — moduli applicativi (`agent_win11.py`, `ai_agent.py`, `tools.py`)
-- `reports/` — log runtime
+- `tests/` — suite di test unitari, sicurezza e usabilità GUI
+- `doc/` — documentazione tecnica completa (`architecture.md`, `security.md`, `testing-and-skills.md`, `licenses.md`, `changelog.md`)
+- `reports/` — log runtime e report JUnit XML (`junit.xml`)
 - `.agents/` — regole (`rules/`) e skill (`skills/`) per coding agent
+
+## Autore & Licenza
+
+- **Autore**: Elpool95
+- **Licenza**: [MIT License](LICENSE) — per l'elenco completo delle licenze di terze parti (`psutil` BSD-3-Clause, `google-genai` Apache-2.0, `pytest` MIT, ecc.) vedi [doc/licenses.md](doc/licenses.md).

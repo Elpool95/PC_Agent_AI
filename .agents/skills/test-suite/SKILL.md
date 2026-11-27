@@ -6,6 +6,12 @@ description: >-
   nuove funzioni, prima di un commit/release o quando l'utente chiede di testare il codice.
 ---
 
+
+
+> **PC Agent AI — Workspace Skill** | **Categoria:** Quality & Testing | **Versione:** 1.0.0 | **Autore:** Elpool95
+
+---
+
 # Test Suite & JUnit Coverage Skill
 
 Procedura standard per verificare il funzionamento, la sicurezza e la copertura del codice di `PC_Agent_AI`.
@@ -40,3 +46,7 @@ pip install -r requirements-dev.txt
 4. **Analisi del risultato**:
    - Se la coverage scende sotto l'80%, individuare le righe scoperte nella colonna `Missing` e aggiungere i test mancanti in `tests/`.
    - Verificare che `reports/junit.xml` riporti `failures="0"` e `errors="0"`.
+
+---
+
+*PC Agent AI Skill v1.0.0 — Autore: Elpool95 | Licenza: MIT | Validata con `skill-evaluator` | Documentazione: `doc/testing-and-skills.md`*

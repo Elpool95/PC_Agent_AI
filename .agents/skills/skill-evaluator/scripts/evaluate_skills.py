@@ -1,12 +1,36 @@
-"""Valutatore automatico delle skill in .agents/skills/."""
+"""Valutatore e sincronizzatore automatico delle skill in .agents/skills/."""
 
+import json
 from pathlib import Path
 import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[4]
 SKILLS_DIR = ROOT / ".agents" / "skills"
+TEMPLATE_PATH = ROOT / "config" / "skill_header_footer.json"
 MIN_SCORE = 75
+SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def load_template_config() -> dict:
+    """Carica header, footer, autore, licenza e versione semantica (X.Y.Z) da config/skill_header_footer.json."""
+    data = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    version = str(data.get("version", "")).strip()
+    author = str(data.get("author", "")).strip()
+    lic = str(data.get("license", "")).strip()
+    if not SEMVER_RE.fullmatch(version):
+        raise ValueError(f"Versione non SemVer (atteso X.Y.Z) in {TEMPLATE_PATH}: '{version}'")
+    if not author:
+        raise ValueError(f"Campo 'author' mancante in {TEMPLATE_PATH}")
+    if not lic:
+        raise ValueError(f"Campo 'license' mancante in {TEMPLATE_PATH}")
+    return {
+        "version": version,
+        "author": author,
+        "license": lic,
+        "header": str(data["header"]),
+        "footer": str(data["footer"]),
+    }
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -27,7 +51,44 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     return fm, body
 
 
-def evaluate_skill(skill_file: Path) -> dict:
+def build_header_regex(header_tpl: str, tpl: dict) -> re.Pattern:
+    escaped = re.escape(header_tpl)
+    escaped = escaped.replace(re.escape("{categoria}"), r"[^|\n]+")
+    escaped = escaped.replace(re.escape("{version}"), re.escape(tpl["version"]))
+    escaped = escaped.replace(re.escape("{author}"), re.escape(tpl["author"]))
+    escaped = escaped.replace(re.escape("{license}"), re.escape(tpl["license"]))
+    return re.compile(r"^" + escaped + r"$", re.MULTILINE)
+
+
+def sync_skill_header_footer(skill_file: Path, tpl: dict) -> bool:
+    """Aggiorna header e footer della skill in base a config/skill_header_footer.json."""
+    content = skill_file.read_text(encoding="utf-8")
+    m = re.match(r"^(---\s*\n.*?\n---\s*\n)(.*)$", content, re.DOTALL)
+    if not m:
+        return False
+    fm_block, body = m.group(1), m.group(2)
+
+    cat_match = re.search(r"\*\*Categoria:\*\*\s*([^|\n]+)", body)
+    categoria = cat_match.group(1).strip() if cat_match else "General"
+    ctx = {"categoria": categoria, "version": tpl["version"], "author": tpl["author"], "license": tpl["license"]}
+    new_header = tpl["header"].format(**ctx)
+    new_footer = tpl["footer"].format(**ctx)
+
+    # Rimuovi vecchio header se presente
+    body = re.sub(r"^\s*>\s*\*\*PC Agent AI — Workspace Skill\*\*[^\n]*\n+\s*---\s*\n+", "", body)
+    # Rimuovi vecchio footer se presente
+    body = re.sub(r"\n+---\s*\n+\*PC Agent AI Skill[^\n]*\*\s*$", "", body.rstrip())
+
+    updated = f"{fm_block}\n{new_header}\n\n---\n\n{body.lstrip()}\n\n---\n\n{new_footer}\n"
+    if updated != content:
+        skill_file.write_text(updated, encoding="utf-8")
+        return True
+    return False
+
+
+def evaluate_skill(skill_file: Path, tpl: dict | None = None) -> dict:
+    if tpl is None:
+        tpl = load_template_config()
     folder_name = skill_file.parent.name
     content = skill_file.read_text(encoding="utf-8")
     lines = content.splitlines()
@@ -57,24 +118,39 @@ def evaluate_skill(skill_file: Path) -> dict:
     else:
         issues.append("Frontmatter 'description' troppo breve (< 40 caratteri) o mancante")
 
-    # 2. Struttura & Chiarezza (25 pt)
+    # 2. Struttura, Header & Footer da config/skill_header_footer.json (25 pt)
+    header_re = build_header_regex(tpl["header"], tpl)
+    expected_footer = tpl["footer"].format(
+        categoria="", version=tpl["version"], author=tpl["author"], license=tpl["license"]
+    )
+
+    if header_re.search(body):
+        score += 4
+    else:
+        issues.append(f"Header non conforme a config/skill_header_footer.json (versione attesa {tpl['version']})")
+
+    if expected_footer in body:
+        score += 4
+    else:
+        issues.append(f"Footer non conforme a config/skill_header_footer.json (versione attesa {tpl['version']})")
+
     if re.search(r"^#\s+\S+", body, re.MULTILINE):
-        score += 8
+        score += 5
     else:
         issues.append("Manca titolo principale H1")
 
     if re.search(r"^\s*1\.\s+", body, re.MULTILINE) or re.search(r"^##\s+", body, re.MULTILINE):
-        score += 9
+        score += 6
     else:
         issues.append("Mancano sezioni H2 o passi numerati")
 
     if any(k in body.lower() for k in ("verific", "controll", "soglia", "exit", "report", "pass")):
-        score += 8
+        score += 6
     else:
         issues.append("Mancano criteri espliciti di verifica/validazione")
 
     # 3. Coerenza col repository (20 pt)
-    path_refs = re.findall(r"`([A-Za-z0-9_./-]+\.(?:py|ini|md|txt|bat))`", body)
+    path_refs = re.findall(r"`([A-Za-z0-9_./-]+\.(?:py|ini|md|txt|bat|json))`", body)
     missing_refs = []
     for ref in set(path_refs):
         if ref.startswith(("http", "reports/")):
@@ -116,16 +192,22 @@ def evaluate_skill(skill_file: Path) -> dict:
     }
 
 
-def main() -> int:
+def main(argv=None) -> int:
+    args = argv if argv is not None else sys.argv[1:]
+    tpl = load_template_config()
     skill_files = sorted(SKILLS_DIR.glob("*/SKILL.md"))
     if not skill_files:
         print("Nessuna skill trovata in .agents/skills/")
         return 1
 
+    if "--sync" in args:
+        aggiornate = sum(1 for sf in skill_files if sync_skill_header_footer(sf, tpl))
+        print(f"Sincronizzati header/footer (v{tpl['version']}) su {aggiornate} skill.")
+
     all_ok = True
-    print(f"=== Skill Evaluator ({len(skill_files)} skill trovate) ===")
+    print(f"=== Skill Evaluator v{tpl['version']} ({len(skill_files)} skill trovate) ===")
     for sf in skill_files:
-        res = evaluate_skill(sf)
+        res = evaluate_skill(sf, tpl)
         stato = "PASS" if res["passed"] else "FAIL"
         print(f"[{stato}] {res['skill']}: {res['score']}/100 ({res['path']})")
         for issue in res["issues"]:

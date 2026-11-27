@@ -9,7 +9,8 @@ Progetto desktop Python/Tkinter per Windows 10/11: telemetria hardware live + ot
 - `modules/ai_agent.py`: classe `GeminiAgent` con prompt di sistema generato dinamicamente dall'hardware rilevato, registrazione tool e fallback automatico tra modelli Gemini su errori `503`/`504`/`429`/`404`.
 - `modules/agent_win11.py`: GUI Tkinter (`PCAgentGUI`) avviata come `pythonw -m modules.agent_win11`, con barra telemetria live (CPU+ventole, RAM+banchi, griglia dischi con colore per singolo disco, GPU, Rete+ping), pulsanti rapidi, console chat e footer OS/driver.
 - `.agents/rules/` e `.agents/skills/`: regole e skill personalizzate per Antigravity.
-- `reports/`: cartella dedicata ai file di log runtime (`*.log` ignorati da Git).
+- `doc/`: documentazione tecnica completa (`architecture.md`, `security.md`, `testing-and-skills.md`, `changelog.md`).
+- `reports/`: cartella dedicata ai file di log runtime e report JUnit XML (`*.log`, `*.xml` ignorati da Git).
 - `install.bat` / `avvia_agent.bat`: installer automatico (`.venv`, `requirements.txt`, `config/.env`, icona Desktop) e launcher portabile senza console (`pythonw -m modules.agent_win11`).
 - `config/.env.example` / `requirements.txt` / `README.md`: template API key, dipendenze e documentazione.
 

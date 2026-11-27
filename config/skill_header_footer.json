@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "author": "Elpool95",
+  "license": "MIT",
+  "header": "> **PC Agent AI — Workspace Skill** | **Categoria:** {categoria} | **Versione:** {version} | **Autore:** {author}",
+  "footer": "*PC Agent AI Skill v{version} — Autore: {author} | Licenza: {license} | Validata con `skill-evaluator` | Documentazione: `doc/testing-and-skills.md`*"
+}

@@ -6,6 +6,12 @@ description: >-
   si aggiungono pulsanti/righe telemetria o l'utente chiede un audit UX/usabilità.
 ---
 
+
+
+> **PC Agent AI — Workspace Skill** | **Categoria:** UX & Usability | **Versione:** 1.0.0 | **Autore:** Elpool95
+
+---
+
 # Usability Testing Skill (GUI Tkinter)
 
 Checklist e verifica automatizzata/visuale per garantire che l'interfaccia di `PC_Agent_AI` sia chiara, reattiva e usabile su qualsiasi risoluzione Windows.
@@ -27,3 +33,7 @@ Controllano automaticamente:
 3. **Feedback chiaro**: durante l'invio a Gemini il pulsante `Send` si disabilita e appare `Elaborazione in corso...`; in caso di fallback modello appare l'avviso in console.
 4. **Contrasto e leggibilità**: colori ad alto contrasto su sfondo scuro (`#141414` / `#1e1e1e` / `#252526`).
 5. **Chiusura pulita**: nessun processo fantasma o finestra terminale residua alla chiusura.
+
+---
+
+*PC Agent AI Skill v1.0.0 — Autore: Elpool95 | Licenza: MIT | Validata con `skill-evaluator` | Documentazione: `doc/testing-and-skills.md`*
