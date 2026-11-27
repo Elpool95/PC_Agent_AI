@@ -81,7 +81,7 @@ def test_gemini_agent_hitl_confirmation_blocks_and_allows():
     p1, p2, p3, p4 = _patch_hw_and_client(mock_client)
     with p1, p2, p3, p4:
         ag_deny = GeminiAgent(confirm_callback=lambda msg: False)
-        tools_map = {fn.__name__: fn for fn in ag_deny._config_chat.tools}
+        tools_map = {getattr(fn, "__name__", ""): fn for fn in ag_deny._config_chat.tools}
 
         with patch("modules.tools.termina_processo") as m_kill, \
              patch("modules.tools.disabilita_app_avvio") as m_dis, \
@@ -97,7 +97,7 @@ def test_gemini_agent_hitl_confirmation_blocks_and_allows():
             m_temp.assert_not_called()
 
         ag_allow = GeminiAgent(confirm_callback=lambda msg: True)
-        tools_allow = {fn.__name__: fn for fn in ag_allow._config_chat.tools}
+        tools_allow = {getattr(fn, "__name__", ""): fn for fn in ag_allow._config_chat.tools}
         with patch("modules.tools.termina_processo", return_value="OK_KILL") as m_kill2, \
              patch("modules.tools.disabilita_app_avvio", return_value="OK_DIS") as m_dis2, \
              patch("modules.tools.attiva_modalita_prestazioni", return_value="OK_PERF") as m_perf2, \

@@ -4,15 +4,23 @@ import pytest
 from modules.agent_win11 import PCAgentGUI
 
 
-@pytest.fixture
-def gui_app():
+@pytest.fixture(scope="module")
+def tk_root():
     root = tk.Tk()
     root.withdraw()
-    with patch("threading.Thread") as mock_thread:
-        app = PCAgentGUI(root)
-    root.update_idletasks()
-    yield app, root, mock_thread
+    yield root
     root.destroy()
+
+
+@pytest.fixture
+def gui_app(tk_root):
+    win = tk.Toplevel(tk_root)
+    win.withdraw()
+    with patch("threading.Thread") as mock_thread:
+        app = PCAgentGUI(win)
+    win.update_idletasks()
+    yield app, win, mock_thread
+    win.destroy()
 
 
 def test_gui_usability_labels_and_bottom_anchor(gui_app):
