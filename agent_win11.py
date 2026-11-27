@@ -10,7 +10,7 @@ from ai_agent import GeminiAgent
 class PCAgentGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("PC Agent AI — Windows 11 + RTX 3070")
+        self.root.title("PC Agent AI — Windows Monitor & Optimizer")
         self.root.geometry("900x760")
         self.root.minsize(820, 620)
         self.root.configure(bg="#1e1e1e")
@@ -56,7 +56,7 @@ class PCAgentGUI:
         row3 = tk.Frame(tele_frame, bg="#141414")
         row3.pack(fill=tk.X, padx=8, pady=2)
 
-        self.lbl_gpu = tk.Label(row3, text="RTX 3070: --% | --°C | VRAM: --/-- MB | Consumo: -- W", bg="#141414", fg="#ffb74d", font=("Consolas", 10, "bold"))
+        self.lbl_gpu = tk.Label(row3, text="GPU: --% | --°C | VRAM: --/-- MB | -- W", bg="#141414", fg="#ffb74d", font=("Consolas", 10, "bold"))
         self.lbl_gpu.pack(side=tk.LEFT, padx=4)
 
         row4 = tk.Frame(tele_frame, bg="#141414")
@@ -158,7 +158,7 @@ class PCAgentGUI:
         self.chat_area.tag_config("agent", foreground="#81c784", font=("Segoe UI", 10, "bold"))
         self.chat_area.tag_config("locale", foreground="#ffb74d", font=("Segoe UI", 10, "bold"))
 
-        self.aggiungi_testo("Agent", "Pronto. Telemetria live attiva: CPU (Temp + W), RAM, tutti i dischi, RTX 3070 e Rete.\n")
+        self.aggiungi_testo("Agent", "Pronto. Telemetria live attiva: CPU (Temp + W), RAM, tutti i dischi, GPU e Rete.\n")
 
         self.ram_info_hw = {"banchi": [], "frequenza_mhz": 0, "tipo": "RAM", "modalita_canale": "", "totale_gb": 0}
 
@@ -267,8 +267,9 @@ class PCAgentGUI:
                     gpu_color = "#ff5252"
                 else:
                     temp_num = gpu["temperatura_num"]
+                    gpu_nome = gpu["gpu"].replace("NVIDIA GeForce ", "").strip()
                     gpu_text = (
-                        f"RTX 3070: {gpu['utilizzo_percent']} | {gpu['temperatura_c']} | "
+                        f"{gpu_nome}: {gpu['utilizzo_percent']} | {gpu['temperatura_c']} | "
                         f"VRAM: {gpu['vram_usata_mb']}/{gpu['vram_totale_mb']} MB | "
                         f"{gpu['consumo_watt']} | Fan: {gpu['ventola_percent']} | {gpu['clock_mhz']}"
                     )

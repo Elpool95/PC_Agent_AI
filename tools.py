@@ -55,7 +55,7 @@ def analizza_sistema() -> dict:
     }
 
 def monitora_gpu() -> dict:
-    """Legge utilizzo, temperatura, VRAM usata/totale, consumo W, ventola % e clock MHz della RTX 3070."""
+    """Legge utilizzo, temperatura, VRAM usata/totale, consumo W, ventola % e clock MHz della GPU NVIDIA."""
     try:
         smi = _trova_nvidia_smi()
         cmd = [
@@ -232,6 +232,14 @@ def info_versioni_sistema() -> dict:
 
     return {"windows": win_str, "driver_gpu": driver_str}
 
+def info_cpu_nome() -> str:
+    """Legge il nome del processore installato dal registro di Windows."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+            return winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+    except Exception:
+        return "CPU Windows"
+
 def info_banchi_ram() -> dict:
     """Legge i dettagli hardware di tutti i banchi RAM installati (slot, GB, DDR, frequenza MHz, voltaggio, codice)."""
     tipi_ddr = {20: "DDR", 21: "DDR2", 24: "DDR3", 26: "DDR4", 34: "DDR5"}
@@ -390,10 +398,11 @@ def analizza_spazio_disco(unita: str = "C:") -> dict:
     if len(unita_norm) == 1:
         unita_norm += ":"
     user_home = os.path.expanduser("~")
+    win_dir = os.environ.get("SystemRoot", r"C:\Windows")
     candidati = [
         ("File Temporanei Utente", tempfile.gettempdir()),
-        ("Windows Temp", r"C:\Windows\Temp"),
-        ("Windows Update Cache", r"C:\Windows\SoftwareDistribution\Download"),
+        ("Windows Temp", os.path.join(win_dir, "Temp")),
+        ("Windows Update Cache", os.path.join(win_dir, r"SoftwareDistribution\Download")),
         ("NVIDIA DXCache", os.path.join(user_home, r"AppData\Local\NVIDIA\DXCache")),
         ("NVIDIA GLCache", os.path.join(user_home, r"AppData\Local\NVIDIA\GLCache")),
         ("Download Utente", os.path.join(user_home, "Downloads")),

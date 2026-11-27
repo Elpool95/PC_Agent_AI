@@ -1,3 +1,4 @@
+import psutil
 import time
 from google import genai
 from google.genai import types
@@ -14,15 +15,22 @@ class GeminiAgent:
         self._inizializza(GEMINI_MODEL)
 
     def _costruisci_config(self):
+        cpu_nome = tools.info_cpu_nome()
+        cpu_core = psutil.cpu_count(logical=False) or psutil.cpu_count() or "?"
+        ram_gb = round(psutil.virtual_memory().total / (1024**3))
+        gpu_info = tools.monitora_gpu()
+        gpu_nome = gpu_info.get("gpu", "GPU non rilevata")
+        win_ver = tools.info_versioni_sistema().get("windows", "Windows")
+
         istruzioni = (
-            "Sei un Agent AI di ottimizzazione per Windows 11 23H2 su un PC con Intel i5-6500 (4 core), "
-            "24 GB di RAM DDR4 e NVIDIA RTX 3070. Rispondi in italiano in modo conciso e pratico. "
-            "Usa gli strumenti disponibili per analizzare CPU/RAM/banchi RAM/ventole, monitorare la RTX 3070, "
+            f"Sei un Agent AI di ottimizzazione per {win_ver} su un PC con {cpu_nome} ({cpu_core} core), "
+            f"{ram_gb} GB di RAM e {gpu_nome}. Rispondi in italiano in modo conciso e pratico. "
+            "Usa gli strumenti disponibili per analizzare CPU/RAM/banchi RAM/ventole, monitorare la GPU, "
             "controllare dischi e spazio occupato, verificare rete e ping, controllare versioni di Windows/driver, "
             "gestire app all'avvio, terminare processi bloccati in modo sicuro, attivare la modalità prestazioni, "
             "pulire file temporanei o ripristinare il piano bilanciato. Non chiudere né suggerire mai di "
-            "disabilitare Riot Vanguard, Riot Client, Discord o Steam. Prima di disabilitare un'app all'avvio "
-            "o terminare un processo, chiedi sempre conferma esplicita all'utente."
+            "disabilitare i processi protetti configurati (es. Riot Vanguard, Riot Client, Discord, Steam). "
+            "Prima di disabilitare un'app all'avvio o terminare un processo, chiedi sempre conferma esplicita all'utente."
         )
         return types.GenerateContentConfig(
             system_instruction=istruzioni,

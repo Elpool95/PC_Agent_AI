@@ -1,4 +1,22 @@
+import os
 import subprocess
+
+# Carica eventuali variabili da un file .env locale (es. GEMINI_API_KEY) senza dipendenze esterne
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.isfile(_env_path):
+    try:
+        with open(_env_path, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _v = _line.split("=", 1)
+                _k = _k.strip()
+                _v = _v.strip().strip('"').strip("'")
+                if _k and _v and _k not in os.environ:
+                    os.environ[_k] = _v
+    except Exception:
+        pass
 
 # Modello Gemini principale, fallback automatici e timeout (in millisecondi)
 GEMINI_MODEL = "gemini-3.8-flash"

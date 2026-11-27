@@ -1,0 +1,67 @@
+@echo off
+setlocal
+cd /d "%~dp0"
+
+echo ============================================
+echo   PC Agent AI - Installazione Automatica
+echo ============================================
+echo.
+
+set "PY_CMD="
+where python >nul 2>nul
+if %errorlevel%==0 (
+    set "PY_CMD=python"
+) else (
+    where py >nul 2>nul
+    if %errorlevel%==0 (
+        set "PY_CMD=py -3"
+    )
+)
+
+if "%PY_CMD%"=="" (
+    echo [ERRORE] Python 3.10+ non trovato nel sistema.
+    echo Scaricalo da https://www.python.org/downloads/ selezionando "Add Python to PATH".
+    pause
+    exit /b 1
+)
+
+echo [1/4] Creazione ambiente virtuale (.venv)...
+if not exist ".venv\Scripts\python.exe" (
+    %PY_CMD% -m venv .venv
+    if %errorlevel% neq 0 (
+        echo [ERRORE] Impossibile creare l'ambiente virtuale .venv.
+        pause
+        exit /b 1
+    )
+)
+
+echo [2/4] Installazione dipendenze da requirements.txt...
+".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
+".venv\Scripts\pip.exe" install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo [ERRORE] Errore durante l'installazione delle dipendenze.
+    pause
+    exit /b 1
+)
+
+echo [3/4] Configurazione file .env...
+if not exist ".env" (
+    if exist ".env.example" (
+        copy /Y ".env.example" ".env" >nul
+        echo File .env creato da .env.example. Ricordati di inserire la tua GEMINI_API_KEY!
+    )
+)
+
+echo [4/4] Vuoi creare un collegamento sul Desktop per avviare PC Agent AI? (S/N)
+set /p "CREA_LNK=Scelta [S/N]: "
+if /I "%CREA_LNK%"=="S" (
+    powershell -NoProfile -Command "$s = New-Object -ComObject WScript.Shell; $lnk = $s.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\PC Agent AI.lnk'); $lnk.TargetPath = '%~dp0avvia_agent.bat'; $lnk.WorkingDirectory = '%~dp0'; $lnk.Save()"
+    echo Collegamento "PC Agent AI" creato sul Desktop!
+)
+
+echo.
+echo Installazione completata!
+echo - Inserisci la tua GEMINI_API_KEY nel file .env (o nelle variabili d'ambiente Windows).
+echo - Avvia l'app con avvia_agent.bat o dal collegamento sul Desktop.
+echo.
+pause
